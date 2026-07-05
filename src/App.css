@@ -3603,3 +3603,39 @@ textarea,
 select {
   font-size: 16px;
 }
+
+/* v14: bottom controls are part of app content, not fixed to viewport */
+.app-shell {
+  padding-bottom: calc(28px + env(safe-area-inset-bottom));
+}
+
+.meal-list {
+  padding-bottom: 8px;
+}
+
+.app-footer-actions {
+  display: grid;
+  gap: 10px;
+  margin-top: 16px;
+  padding-bottom: env(safe-area-inset-bottom);
+}
+
+.app-footer-actions .finish-day-button,
+.app-footer-actions .bottom-nav {
+  position: static;
+  left: auto;
+  right: auto;
+  bottom: auto;
+  transform: none;
+  z-index: auto;
+  width: 100%;
+}
+
+.app-footer-actions .finish-day-button {
+  height: 44px;
+}
+
+.app-footer-actions .bottom-nav {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+}

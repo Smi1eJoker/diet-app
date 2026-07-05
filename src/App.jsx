@@ -447,7 +447,9 @@ async function fetchUserDailyLogs(session) {
     (acc, row) => {
       const key = row.date_key;
       if (!key) return acc;
-      acc.mealsByDate[key] = Array.isArray(row.meals) ? row.meals : [];
+      acc.mealsByDate[key] = Array.isArray(row.meals)
+        ? row.meals.map((meal) => ({ ...meal, isOpen: false }))
+        : [];
       acc.dailyRecords[key] = row.daily_record || {};
       return acc;
     },
@@ -1306,7 +1308,7 @@ function parseDailyMemoInput(input, customFoods, basisMap = {}) {
     meals.push({
       id: makeId("meal"),
       time,
-      isOpen: true,
+      isOpen: false,
       items,
     });
   });
@@ -1334,7 +1336,7 @@ function mergeMealsWithSameTime(meals) {
     const targetIndex = indexByTime.get(time);
     mergedMeals[targetIndex] = {
       ...mergedMeals[targetIndex],
-      isOpen: mergedMeals[targetIndex].isOpen || meal.isOpen,
+      isOpen: false,
       items: [...mergedMeals[targetIndex].items, ...meal.items],
     };
   });
@@ -2090,6 +2092,17 @@ export default function App() {
     setActiveMemoRowIndex(rowIndex);
     setMemoPreviewHidden(true);
     updateMemoRowField(rowIndex, "time", formatted);
+
+    if (/^\d{2}:\d{2}$/.test(formatted)) {
+      requestAnimationFrame(() => {
+        const target = memoFoodRefs.current[rowIndex];
+        target?.focus();
+        const cursor = target?.value?.length || 0;
+        target?.setSelectionRange(cursor, cursor);
+        setActiveMemoFoodCursor(cursor);
+        setMemoPreviewHidden(false);
+      });
+    }
   };
 
   const handleMemoRowTimeKeyDown = (rowIndex, event) => {
@@ -2955,7 +2968,19 @@ export default function App() {
         <StatsScreen stats={stats} plan={activePlan} totals={totals} />
       )}
 
-      <BottomNav activeTab={activeTab} onChange={setActiveTab} />
+      <div className="app-footer-actions">
+        {activeTab === "record" && (
+          <button
+            className={dayComplete ? "finish-day-button is-complete" : "finish-day-button"}
+            type="button"
+            onClick={completeDay}
+            {...(dayComplete ? finishDayLongPressProps : {})}
+          >
+            {dayComplete ? "오늘 식단 완성됨" : "오늘 하루 식단 완성"}
+          </button>
+        )}
+        <BottomNav activeTab={activeTab} onChange={setActiveTab} />
+      </div>
 
       {amountTarget && (
         <Modal title={amountTarget.name + " 중량 등록"} onClose={closeAmountModal}>
@@ -3091,17 +3116,6 @@ export default function App() {
             <ModalActions onCancel={closeFoodEditModal} submitText="수정" />
           </form>
         </Modal>
-      )}
-
-      {activeTab === "record" && (
-        <button
-          className={dayComplete ? "finish-day-button is-complete" : "finish-day-button"}
-          type="button"
-          onClick={completeDay}
-          {...(dayComplete ? finishDayLongPressProps : {})}
-        >
-          {dayComplete ? "오늘 식단 완성됨" : "오늘 하루 식단 완성"}
-        </button>
       )}
 
       {calendarOpen && (
