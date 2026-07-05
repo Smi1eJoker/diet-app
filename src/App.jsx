@@ -135,6 +135,32 @@ async function signUpWithEmail(email, password) {
   return requestSupabaseAuth("/auth/v1/signup", { email, password });
 }
 
+async function refreshSupabaseSession(refreshToken) {
+  if (!refreshToken) throw new Error("저장된 로그인 정보를 확인하지 못했어.");
+  return requestSupabaseAuth("/auth/v1/token?grant_type=refresh_token", { refresh_token: refreshToken });
+}
+
+function getSessionExpiresAtMs(session) {
+  if (session?.expires_at) return Number(session.expires_at) * 1000;
+  if (session?.expires_in) return Date.now() + Number(session.expires_in) * 1000;
+  return 0;
+}
+
+function isSessionExpiringSoon(session, bufferMs = 60 * 1000) {
+  const expiresAtMs = getSessionExpiresAtMs(session);
+  if (!expiresAtMs) return false;
+  return expiresAtMs - Date.now() <= bufferMs;
+}
+
+function mergeAuthSession(currentSession, nextSession) {
+  if (!nextSession?.access_token) return currentSession;
+  return {
+    ...currentSession,
+    ...nextSession,
+    user: nextSession.user || currentSession?.user || null,
+  };
+}
+
 async function signOutFromSupabase(session) {
   if (!session?.access_token) return;
   await requestSupabaseAuth("/auth/v1/logout", {}, session.access_token);
@@ -1443,6 +1469,7 @@ function useLongPress(onLongPress, delay = 650) {
 
 export default function App() {
   const [authSession, setAuthSession] = useState(() => loadStoredSession());
+  const [authChecking, setAuthChecking] = useState(() => Boolean(authSession));
   const [authMode, setAuthMode] = useState("signin");
   const [authForm, setAuthForm] = useState({ email: "", password: "" });
   const [authError, setAuthError] = useState("");
@@ -1492,6 +1519,68 @@ export default function App() {
   const foodEditAmountRef = useRef(null);
   const cloudSaveTimerRef = useRef(null);
   const finishDayLongPressProps = useLongPress(() => setActionTarget({ type: "day" }));
+
+  useEffect(() => {
+    if (!HAS_SUPABASE_CONFIG || !authSession) {
+      setAuthChecking(false);
+      return;
+    }
+
+    let isMounted = true;
+
+    const restoreSession = async () => {
+      try {
+        if (authSession.refresh_token && isSessionExpiringSoon(authSession, 5 * 60 * 1000)) {
+          const refreshedSession = await refreshSupabaseSession(authSession.refresh_token);
+          if (!isMounted) return;
+          setAuthSession((current) => mergeAuthSession(current, refreshedSession));
+        }
+      } catch (error) {
+        if (!isMounted) return;
+        setAuthSession(null);
+        setAuthError("로그인이 만료됐어. 다시 로그인해줘.");
+      } finally {
+        if (isMounted) setAuthChecking(false);
+      }
+    };
+
+    restoreSession();
+
+    return () => {
+      isMounted = false;
+    };
+    // 첫 실행 때 저장된 세션을 복구하는 용도라 의존성은 비워둔다.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  useEffect(() => {
+    if (!HAS_SUPABASE_CONFIG || !authSession?.refresh_token) return;
+
+    const expiresAtMs = getSessionExpiresAtMs(authSession);
+    if (!expiresAtMs) return;
+
+    const refreshDelayMs = Math.max(1000, expiresAtMs - Date.now() - 60 * 1000);
+    let isCancelled = false;
+
+    const timerId = window.setTimeout(async () => {
+      try {
+        const refreshedSession = await refreshSupabaseSession(authSession.refresh_token);
+        if (!isCancelled) {
+          setAuthSession((current) => mergeAuthSession(current, refreshedSession));
+        }
+      } catch {
+        if (!isCancelled) {
+          setAuthSession(null);
+          setAuthError("로그인이 만료됐어. 다시 로그인해줘.");
+        }
+      }
+    }, refreshDelayMs);
+
+    return () => {
+      isCancelled = true;
+      window.clearTimeout(timerId);
+    };
+  }, [authSession?.access_token, authSession?.refresh_token]);
 
   useEffect(() => {
     saveStoredSession(authSession);
@@ -1648,6 +1737,7 @@ export default function App() {
 
       if (data.access_token) {
         setAuthSession(data);
+        setAuthChecking(false);
         setAuthMessage("로그인됐어.");
       } else {
         setAuthMessage("가입 메일을 확인한 뒤 로그인해줘.");
@@ -1666,6 +1756,7 @@ export default function App() {
       // Local session removal is enough if the remote sign-out request fails.
     }
     setAuthSession(null);
+    setAuthChecking(false);
     setAuthMessage("");
     setAuthError("");
     setSetupScreen("setup");
@@ -2634,6 +2725,18 @@ export default function App() {
 
     return currentFood ? dedupeFoodMatches([currentFood, ...matches]) : matches;
   }, [nutritionTarget, customFoods]);
+
+  if (authChecking) {
+    return (
+      <div className="login-shell">
+        <div className="login-card">
+          <span className="login-kicker">Diet Memo</span>
+          <h1>로그인 상태 확인 중</h1>
+          <p>저장된 로그인 정보로 자동 로그인하고 있어.</p>
+        </div>
+      </div>
+    );
+  }
 
   if (!authSession) {
     return (
