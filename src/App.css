@@ -3562,3 +3562,44 @@ input[type="number"]::-webkit-inner-spin-button {
 .select-field select {
   font-size: 16px;
 }
+
+/* iOS Safari: prevent input zoom and horizontal page shifting */
+html,
+body,
+#root {
+  width: 100%;
+  min-width: 320px;
+  min-height: 100%;
+  overflow-x: hidden;
+  overscroll-behavior-x: none;
+}
+
+html {
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+}
+
+body {
+  position: relative;
+  touch-action: pan-y;
+}
+
+.app-shell,
+.setup-shell,
+.login-shell {
+  max-width: 430px;
+  overflow-x: hidden;
+}
+
+input,
+textarea,
+select,
+button {
+  touch-action: manipulation;
+}
+
+input,
+textarea,
+select {
+  font-size: 16px;
+}
