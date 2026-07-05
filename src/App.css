@@ -3639,3 +3639,50 @@ select {
   display: grid;
   grid-template-columns: 1fr 1fr;
 }
+
+/* v15: prevent iOS long-press text selection/callout on app controls */
+.app-shell,
+.setup-shell,
+.login-shell,
+.meal-card,
+.meal-header,
+.meal-header-clickable,
+.food-row,
+.food-row-clickable,
+.action-sheet,
+.action-sheet *,
+.modal-card,
+.modal-head,
+.bottom-nav,
+.finish-day-button,
+.primary-button,
+.ghost-button,
+.collapse-button,
+.food-actions,
+.food-register-actions,
+.memo-db-preview,
+.memo-preview-row,
+.alias-candidate-list,
+button {
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
+}
+
+input,
+textarea,
+[contenteditable="true"] {
+  -webkit-user-select: text;
+  user-select: text;
+  -webkit-touch-callout: default;
+}
+
+.meal-card,
+.food-row,
+.action-sheet button,
+.match-choice-sheet button,
+.memo-db-preview button,
+.alias-candidate-list button {
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
+}
