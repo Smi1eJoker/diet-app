@@ -270,8 +270,8 @@ function buildFoodMap(appFoods = [], userAliases = [], userFoods = [], foodSearc
       ...(canonical.searchTerms || []),
       {
         text: cleanFoodName(term.term_text),
-        normalized: normalize(term.normalized_term || term.term_text),
-        weight: toNumber(term.search_weight) || 50,
+        normalized: normalize(term.term_norm || term.term_text),
+        weight: toNumber(term.weight) || 50,
       },
     ];
   });
@@ -303,7 +303,7 @@ async function fetchFoodDatabase(session) {
   const userId = getSessionUserId(session);
 
   const appFoodsPath = "/app_foods?select=app_food_id,display_name,raw_food_id,category,default_unit,default_amount,search_priority,raw_foods(raw_food_id,raw_name,kcal_per_100g,carb_g_per_100g,protein_g_per_100g,fat_g_per_100g)&order=search_priority.desc,display_name.asc";
-  const foodSearchTermsPath = "/food_search_terms?select=term_id,term_text,normalized_term,app_food_id,user_food_id,search_weight&order=search_weight.desc,term_text.asc";
+  const foodSearchTermsPath = "/food_search_terms?select=term_id,term_text,term_norm,app_food_id,weight&order=weight.desc,term_text.asc";
 
   // 기본 음식 DB는 사용자 로그인 토큰이 아니라 anon/publishable key로 불러온다.
   // 저장된 로그인 토큰이 만료되어도 app_foods/raw_foods는 계속 매칭되어야 한다.
@@ -352,7 +352,7 @@ async function upsertUserFood(session, food) {
   };
 
   const rows = await requestSupabaseRest(
-    "/user_foods?on_conflict=user_id,food_name",
+    "/user_aliases?on_conflict=user_id,alias_norm",
     {
       method: "POST",
       body: payload,
@@ -380,7 +380,7 @@ async function upsertUserAlias(session, aliasText, food) {
   };
 
   const rows = await requestSupabaseRest(
-    "/user_aliases?on_conflict=user_id,alias_text",
+    "/user_foods?on_conflict=user_id,food_name_norm",
     {
       method: "POST",
       body: payload,
@@ -612,10 +612,9 @@ function isSameDate(a, b) {
 }
 
 function normalize(value) {
-  return String(value)
+  return String(value || "")
     .toLocaleLowerCase("ko-KR")
-    .replace(/\s/g, "")
-    .replace(/[(){}\[\],._\-/·ㆍ]/g, "");
+    .replace(/[^0-9a-z가-힣]+/g, "");
 }
 
 function addUniqueToken(tokens, token) {
