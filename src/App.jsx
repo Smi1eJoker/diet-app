@@ -366,6 +366,94 @@ async function upsertUserAlias(session, aliasText, food) {
   return Array.isArray(rows) && rows[0] ? rows[0] : payload;
 }
 
+
+async function fetchUserAppState(session) {
+  const userId = getSessionUserId(session);
+  const accessToken = session?.access_token;
+  if (!userId || !accessToken) return null;
+
+  const rows = await requestSupabaseRest(
+    "/user_app_state?select=profile,nutrition_plan,setup_screen&user_id=eq." + encodeURIComponent(userId),
+    {},
+    accessToken
+  );
+
+  return Array.isArray(rows) && rows[0] ? rows[0] : null;
+}
+
+async function upsertUserAppState(session, state) {
+  const userId = getSessionUserId(session);
+  if (!userId) throw new Error("사용자 정보를 확인하지 못했어.");
+
+  const payload = {
+    user_id: userId,
+    profile: state.profile || {},
+    nutrition_plan: state.nutritionPlan || {},
+    setup_screen: state.setupScreen || "setup",
+    updated_at: new Date().toISOString(),
+  };
+
+  const rows = await requestSupabaseRest(
+    "/user_app_state?on_conflict=user_id",
+    {
+      method: "POST",
+      body: payload,
+      prefer: "resolution=merge-duplicates,return=representation",
+    },
+    session?.access_token
+  );
+
+  return Array.isArray(rows) && rows[0] ? rows[0] : payload;
+}
+
+async function fetchUserDailyLogs(session) {
+  const userId = getSessionUserId(session);
+  const accessToken = session?.access_token;
+  if (!userId || !accessToken) return { mealsByDate: {}, dailyRecords: {} };
+
+  const rows = await requestSupabaseRest(
+    "/user_daily_logs?select=date_key,meals,daily_record&user_id=eq." + encodeURIComponent(userId) + "&order=date_key.asc",
+    {},
+    accessToken
+  );
+
+  return (rows || []).reduce(
+    (acc, row) => {
+      const key = row.date_key;
+      if (!key) return acc;
+      acc.mealsByDate[key] = Array.isArray(row.meals) ? row.meals : [];
+      acc.dailyRecords[key] = row.daily_record || {};
+      return acc;
+    },
+    { mealsByDate: {}, dailyRecords: {} }
+  );
+}
+
+async function upsertUserDailyLog(session, dateKey, meals, dailyRecord) {
+  const userId = getSessionUserId(session);
+  if (!userId) throw new Error("사용자 정보를 확인하지 못했어.");
+
+  const payload = {
+    user_id: userId,
+    date_key: dateKey,
+    meals: meals || [],
+    daily_record: dailyRecord || {},
+    updated_at: new Date().toISOString(),
+  };
+
+  const rows = await requestSupabaseRest(
+    "/user_daily_logs?on_conflict=user_id,date_key",
+    {
+      method: "POST",
+      body: payload,
+      prefer: "resolution=merge-duplicates,return=representation",
+    },
+    session?.access_token
+  );
+
+  return Array.isArray(rows) && rows[0] ? rows[0] : payload;
+}
+
 function getDateKey(date) {
   const target = new Date(date);
   const year = target.getFullYear();
@@ -1393,6 +1481,7 @@ export default function App() {
   const [foodEditTarget, setFoodEditTarget] = useState(null);
   const [foodEditForm, setFoodEditForm] = useState({ name: "", amount: "" });
   const [actionTarget, setActionTarget] = useState(null);
+  const [cloudSyncReady, setCloudSyncReady] = useState(false);
 
   const memoInputRef = useRef(null);
   const dailyMemoCardRef = useRef(null);
@@ -1401,6 +1490,7 @@ export default function App() {
   const skipNextMemoSyncRef = useRef(false);
   const amountInputRef = useRef(null);
   const foodEditAmountRef = useRef(null);
+  const cloudSaveTimerRef = useRef(null);
   const finishDayLongPressProps = useLongPress(() => setActionTarget({ type: "day" }));
 
   useEffect(() => {
@@ -1430,6 +1520,47 @@ export default function App() {
       })
       .finally(() => {
         if (isMounted) setFoodDbLoading(false);
+      });
+
+    return () => {
+      isMounted = false;
+    };
+  }, [authSession]);
+
+  useEffect(() => {
+    if (!authSession || !HAS_SUPABASE_CONFIG) {
+      setCloudSyncReady(false);
+      return;
+    }
+
+    let isMounted = true;
+    setCloudSyncReady(false);
+
+    Promise.all([fetchUserAppState(authSession), fetchUserDailyLogs(authSession)])
+      .then(([appState, dailyLogState]) => {
+        if (!isMounted) return;
+
+        if (appState?.profile && Object.keys(appState.profile).length > 0) {
+          setProfile({ ...DEFAULT_PROFILE, ...appState.profile });
+        }
+
+        if (appState?.nutrition_plan && Object.keys(appState.nutrition_plan).length > 0) {
+          setNutritionPlan(appState.nutrition_plan);
+        }
+
+        if (appState?.setup_screen) {
+          setSetupScreen(appState.setup_screen);
+        }
+
+        setMealsByDate(dailyLogState.mealsByDate || {});
+        setDailyRecords(dailyLogState.dailyRecords || {});
+      })
+      .catch((error) => {
+        if (!isMounted) return;
+        setFoodDbError(error.message || "기록을 불러오지 못했어. Supabase 기록 테이블을 확인해줘.");
+      })
+      .finally(() => {
+        if (isMounted) setCloudSyncReady(true);
       });
 
     return () => {
@@ -1467,6 +1598,12 @@ export default function App() {
     setIsAddingMeal(false);
     setEditingMealId(null);
   }, [selectedDateKey, mealsByDate]);
+
+  useEffect(() => {
+    const record = dailyRecords[selectedDateKey] || {};
+    setMorningWeight(record.morningWeight ? String(record.morningWeight) : "");
+    setDayComplete(Boolean(record.dayComplete));
+  }, [selectedDateKey, dailyRecords]);
 
   const activePlan = nutritionPlan || buildNutritionPlan(profile);
   const calorieGoal = activePlan.calorieGoal;
@@ -1534,6 +1671,13 @@ export default function App() {
     setSetupScreen("setup");
     setActiveTab("record");
     setSettingsOpen(false);
+    setCloudSyncReady(false);
+    setMealsByDate({});
+    setDailyRecords({});
+    setMorningWeight("");
+    setMorningWeightInput("");
+    setProfile(DEFAULT_PROFILE);
+    setNutritionPlan(buildNutritionPlan(DEFAULT_PROFILE));
   };
 
   const openProfileEditor = () => {
@@ -1633,6 +1777,43 @@ export default function App() {
   const sortedMeals = useMemo(() => sortMealsLatestFirst(meals), [meals]);
   const totals = useMemo(() => calculateTotals(meals), [meals]);
   const stats = useMemo(() => buildStats(meals, activePlan, morningWeight, dailyRecords, selectedDate), [meals, activePlan, morningWeight, dailyRecords, selectedDate]);
+
+  useEffect(() => {
+    if (!authSession || !cloudSyncReady || !HAS_SUPABASE_CONFIG) return;
+
+    window.clearTimeout(cloudSaveTimerRef.current);
+    cloudSaveTimerRef.current = window.setTimeout(() => {
+      upsertUserAppState(authSession, { profile, nutritionPlan: activePlan, setupScreen }).catch((error) => {
+        setFoodDbError(error.message || "프로필 저장에 실패했어.");
+      });
+    }, 600);
+
+    return () => window.clearTimeout(cloudSaveTimerRef.current);
+  }, [authSession, cloudSyncReady, profile, activePlan, setupScreen]);
+
+  useEffect(() => {
+    if (!authSession || !cloudSyncReady || !HAS_SUPABASE_CONFIG) return;
+
+    const currentRecord = dailyRecords[selectedDateKey] || {};
+    const recordForSave = {
+      ...currentRecord,
+      dayComplete,
+      kcal: Math.round(totals.kcal),
+      carb: totals.carb,
+      protein: totals.protein,
+      fat: totals.fat,
+      morningWeight: toNumber(morningWeight) || toNumber(currentRecord.morningWeight) || 0,
+    };
+
+    const timer = window.setTimeout(() => {
+      upsertUserDailyLog(authSession, selectedDateKey, meals, recordForSave).catch((error) => {
+        setFoodDbError(error.message || "식단 기록 저장에 실패했어.");
+      });
+    }, 600);
+
+    return () => window.clearTimeout(timer);
+  }, [authSession, cloudSyncReady, selectedDateKey, meals, dailyRecords, morningWeight, dayComplete, totals.kcal, totals.carb, totals.protein, totals.fat]);
+
   const remainingCalories = calorieGoal - totals.kcal;
   const caloriePercent = Math.min(100, Math.round((totals.kcal / calorieGoal) * 100));
   const calorieGraphColor = totals.kcal > calorieGoal ? "#ff5a4f" : "#66e36f";
