@@ -1365,6 +1365,66 @@ function getUnsupportedUnitItem(items) {
   return (items || []).find((item) => item?.unsupportedUnit);
 }
 
+function getUnitWeightOverrideKey(name, unitText) {
+  const foodKey = normalize(cleanFoodName(name));
+  const unitKey = normalize(unitText);
+  return foodKey && unitKey ? foodKey + "::" + unitKey : "";
+}
+
+function getUnitWeightOverride(unitOverrides, name, unitText) {
+  const key = getUnitWeightOverrideKey(name, unitText);
+  const grams = key ? toNumber(unitOverrides?.[key]) : 0;
+  return grams > 0 ? grams : 0;
+}
+
+function createUnitWeightTarget(item, lineNumber) {
+  const foodName = cleanFoodName(item?.name || "");
+  const unitName = item?.displayUnit || item?.unsupportedUnitName || "";
+  const quantity = toNumber(item?.displayAmount) || 1;
+
+  return {
+    key: getUnitWeightOverrideKey(foodName, unitName),
+    foodName,
+    unitName,
+    quantity,
+    lineNumber,
+  };
+}
+
+function createUnsupportedOrOverrideItem(name, quantity, unitText, customFoods, rawLine, basisFood, unitOverrides) {
+  const unitGrams = getUnitWeightOverride(unitOverrides, name, unitText);
+  if (unitGrams > 0) {
+    return createItem(
+      name,
+      toNumber(quantity) * unitGrams,
+      customFoods,
+      rawLine,
+      undefined,
+      basisFood,
+      {
+        displayAmount: quantity,
+        displayUnit: unitText,
+        unitGramOverride: unitGrams,
+      }
+    );
+  }
+
+  return createItem(
+    name,
+    0,
+    customFoods,
+    rawLine,
+    undefined,
+    basisFood,
+    {
+      displayAmount: quantity,
+      displayUnit: unitText,
+      unsupportedUnit: true,
+      unsupportedUnitName: unitText,
+    }
+  );
+}
+
 function makeUnsupportedUnitMessage(item, lineNumber) {
   const foodName = cleanFoodName(item?.name || "이 음식");
   const unitName = item?.displayUnit || item?.unsupportedUnitName || "해당 단위";
@@ -1386,6 +1446,22 @@ function mealsToDailyMemo(meals) {
     .reverse()
     .map(mealToDailyMemoLine)
     .join("\n");
+}
+
+function buildMemoUnitOverrideMapFromMeals(meals) {
+  const overrideMap = {};
+
+  (meals || []).forEach((meal) => {
+    (meal.items || []).forEach((item) => {
+      const key = getUnitWeightOverrideKey(item.name, item.displayUnit);
+      if (!key || toNumber(item.displayAmount) <= 0 || toNumber(item.amount) <= 0) return;
+
+      const unitGrams = toNumber(item.unitGramOverride) || (toNumber(item.amount) / toNumber(item.displayAmount));
+      if (unitGrams > 0) overrideMap[key] = unitGrams;
+    });
+  });
+
+  return overrideMap;
 }
 
 
@@ -1465,6 +1541,7 @@ function parseFoodEntries(text, customFoods, options = {}) {
   const entries = [];
   const rowIndex = options.rowIndex ?? 0;
   const basisMap = options.basisMap || {};
+  const unitOverrides = options.unitOverrides || {};
 
   splitFoodSegments(text)
     .forEach((segment, segmentIndex) => {
@@ -1512,19 +1589,14 @@ function parseFoodEntries(text, customFoods, options = {}) {
             continue;
           }
 
-          entries.push(createItem(
+          entries.push(createUnsupportedOrOverrideItem(
             attachedUnit.name,
-            0,
+            attachedUnit.quantity,
+            attachedUnit.unitText,
             customFoods,
             attachedUnit.name + " " + formatAmount(attachedUnit.quantity) + attachedUnit.unitText,
-            undefined,
             basisFood,
-            {
-              displayAmount: attachedUnit.quantity,
-              displayUnit: attachedUnit.unitText,
-              unsupportedUnit: true,
-              unsupportedUnitName: attachedUnit.unitText,
-            }
+            unitOverrides
           ));
           entryIndex += 1;
           index += 1;
@@ -1553,19 +1625,14 @@ function parseFoodEntries(text, customFoods, options = {}) {
               { displayAmount: unitAmount.quantity, displayUnit: unitAmount.unitText }
             ));
           } else {
-            entries.push(createItem(
+            entries.push(createUnsupportedOrOverrideItem(
               name,
-              0,
+              unitAmount.quantity,
+              unitAmount.unitText,
               customFoods,
               name + " " + formatAmount(unitAmount.quantity) + unitAmount.unitText,
-              undefined,
               basisFood,
-              {
-                displayAmount: unitAmount.quantity,
-                displayUnit: unitAmount.unitText,
-                unsupportedUnit: true,
-                unsupportedUnitName: unitAmount.unitText,
-              }
+              unitOverrides
             ));
           }
 
@@ -1595,7 +1662,7 @@ function parseFoodEntries(text, customFoods, options = {}) {
   return entries;
 }
 
-function parseDailyMemoInput(input, customFoods, basisMap = {}) {
+function parseDailyMemoInput(input, customFoods, basisMap = {}, unitOverrides = {}) {
   const lines = String(input)
     .split("\n")
     .map((line, originalIndex) => ({ line: line.trim(), originalIndex }))
@@ -1603,6 +1670,7 @@ function parseDailyMemoInput(input, customFoods, basisMap = {}) {
 
   const meals = [];
   const errors = [];
+  const unitTargets = [];
 
   lines.forEach(({ line, originalIndex }) => {
     const match = line.match(/^(\d{1,2}(?::\d{1,2})?)\s+(.+)$/);
@@ -1613,10 +1681,10 @@ function parseDailyMemoInput(input, customFoods, basisMap = {}) {
         return;
       }
 
-      const items = parseFoodEntries(line, customFoods, { basisMap, rowIndex: originalIndex });
+      const items = parseFoodEntries(line, customFoods, { basisMap, rowIndex: originalIndex, unitOverrides });
       const unsupportedUnitItem = getUnsupportedUnitItem(items);
       if (unsupportedUnitItem) {
-        errors.push(makeUnsupportedUnitMessage(unsupportedUnitItem, originalIndex + 1));
+        unitTargets.push(createUnitWeightTarget(unsupportedUnitItem, originalIndex + 1));
         return;
       }
       if (items.length === 0) {
@@ -1638,10 +1706,10 @@ function parseDailyMemoInput(input, customFoods, basisMap = {}) {
       return;
     }
 
-    const items = parseFoodEntries(match[2], customFoods, { basisMap, rowIndex: originalIndex });
+    const items = parseFoodEntries(match[2], customFoods, { basisMap, rowIndex: originalIndex, unitOverrides });
     const unsupportedUnitItem = getUnsupportedUnitItem(items);
     if (unsupportedUnitItem) {
-      errors.push(makeUnsupportedUnitMessage(unsupportedUnitItem, originalIndex + 1));
+      unitTargets.push(createUnitWeightTarget(unsupportedUnitItem, originalIndex + 1));
       return;
     }
     if (items.length === 0) {
@@ -1657,7 +1725,7 @@ function parseDailyMemoInput(input, customFoods, basisMap = {}) {
     });
   });
 
-  return { meals, errors };
+  return { meals, errors, unitTargets };
 }
 
 function mergeMealsWithSameTime(meals) {
@@ -1851,6 +1919,9 @@ export default function App() {
   const [nutritionForm, setNutritionForm] = useState({ baseAmount: "100", kcal: "", carb: "", protein: "", fat: "" });
   const [amountTarget, setAmountTarget] = useState(null);
   const [amountInput, setAmountInput] = useState("");
+  const [unitAmountTarget, setUnitAmountTarget] = useState(null);
+  const [unitAmountInput, setUnitAmountInput] = useState("");
+  const [memoUnitOverrides, setMemoUnitOverrides] = useState({});
   const [foodEditTarget, setFoodEditTarget] = useState(null);
   const [foodEditForm, setFoodEditForm] = useState({ name: "", amount: "" });
   const [actionTarget, setActionTarget] = useState(null);
@@ -1862,6 +1933,7 @@ export default function App() {
   const memoFoodRefs = useRef([]);
   const skipNextMemoSyncRef = useRef(false);
   const amountInputRef = useRef(null);
+  const unitAmountInputRef = useRef(null);
   const foodEditAmountRef = useRef(null);
   const cloudSaveTimerRef = useRef(null);
   const finishDayLongPressProps = useLongPress(() => setActionTarget({ type: "day" }));
@@ -2029,6 +2101,7 @@ export default function App() {
 
     setMemoInput(mealsToDailyMemo(currentMeals));
     setMemoFoodBasisMap(buildMemoBasisMapFromMeals(orderedMeals));
+    setMemoUnitOverrides(buildMemoUnitOverrideMapFromMeals(orderedMeals));
     setFormError("");
     setIsAddingMeal(false);
     setEditingMealId(null);
@@ -2345,6 +2418,7 @@ export default function App() {
     setTimeInput("");
     setMemoInput("");
     setMemoFoodBasisMap({});
+    setMemoUnitOverrides({});
     setFormError("");
   };
 
@@ -2355,6 +2429,7 @@ export default function App() {
     setTimeInput("");
     setMemoInput("");
     setMemoFoodBasisMap({});
+    setMemoUnitOverrides({});
     setFormError("");
     requestAnimationFrame(() => memoTimeRefs.current[0]?.focus());
   };
@@ -2376,6 +2451,7 @@ export default function App() {
     setMemoPreviewHidden(true);
     setMemoInput(nextMemo);
     setMemoFoodBasisMap(buildMemoBasisMapFromMeals(orderedMeals));
+    setMemoUnitOverrides(buildMemoUnitOverrideMapFromMeals(orderedMeals));
     setActiveMemoRowIndex(Math.max(0, mealIndex));
     setActiveMemoFoodCursor(foodText.length);
     setFormError("");
@@ -2683,10 +2759,18 @@ export default function App() {
     setMemoCursorIndex(cursor);
   };
 
-  const saveMemoValue = (value) => {
+  const saveMemoValue = (value, unitOverrides = memoUnitOverrides) => {
     if (dayComplete) return false;
 
-    const parsed = parseDailyMemoInput(value, customFoods, memoFoodBasisMap);
+    const parsed = parseDailyMemoInput(value, customFoods, memoFoodBasisMap, unitOverrides);
+    if (parsed.unitTargets?.length > 0) {
+      const target = parsed.unitTargets[0];
+      setUnitAmountTarget(target);
+      setUnitAmountInput("");
+      setFormError("");
+      requestAnimationFrame(() => unitAmountInputRef.current?.focus());
+      return false;
+    }
     if (parsed.errors.length > 0) {
       setFormError(parsed.errors[0]);
       return false;
@@ -2699,6 +2783,7 @@ export default function App() {
     setMeals(mergedMeals);
     setMemoInput(normalizedMemo);
     setMemoFoodBasisMap(buildMemoBasisMapFromMeals(mergedMeals));
+    setMemoUnitOverrides(buildMemoUnitOverrideMapFromMeals(mergedMeals));
     setMemoCursorIndex(normalizedMemo.length);
     setFormError("");
     return true;
@@ -3089,6 +3174,27 @@ export default function App() {
     closeMatchChoice();
   };
 
+  const closeUnitAmountModal = () => {
+    setUnitAmountTarget(null);
+    setUnitAmountInput("");
+  };
+
+  const saveUnitAmount = (event) => {
+    event.preventDefault();
+    if (!unitAmountTarget?.key) return;
+    const nextUnitGrams = toNumber(unitAmountInput);
+    if (nextUnitGrams <= 0) return;
+
+    const nextOverrides = {
+      ...memoUnitOverrides,
+      [unitAmountTarget.key]: nextUnitGrams,
+    };
+
+    setMemoUnitOverrides(nextOverrides);
+    closeUnitAmountModal();
+    saveMemoValue(memoInput, nextOverrides);
+  };
+
   const openAmountModal = (mealId, item) => {
     setAmountTarget({ mealId, itemId: item.id, name: item.name });
     setAmountInput(item.amount > 0 ? String(item.amount) : "");
@@ -3389,6 +3495,7 @@ export default function App() {
                 if (window.confirm("현재 메모를 비울까요?")) {
                   setMemoInput("");
                   setMemoFoodBasisMap({});
+                  setMemoUnitOverrides({});
                   setMeals([]);
                 }
               }}
@@ -3442,6 +3549,31 @@ export default function App() {
         )}
         <BottomNav activeTab={activeTab} onChange={setActiveTab} />
       </div>
+
+      {unitAmountTarget && (
+        <Modal title={unitAmountTarget.foodName + " " + unitAmountTarget.unitName + " 중량 등록"} onClose={closeUnitAmountModal}>
+          <form className="modal-form" onSubmit={saveUnitAmount}>
+            <label>
+              <span>1{unitAmountTarget.unitName}에 해당하는 중량(g)</span>
+              <input
+                ref={unitAmountInputRef}
+                value={unitAmountInput}
+                onChange={(event) => setUnitAmountInput(event.target.value)}
+                type="number"
+                step="1"
+                min="0"
+                placeholder="예: 100"
+              />
+            </label>
+            {unitAmountTarget.quantity > 1 && (
+              <p className="modal-hint">
+                이번 입력은 {formatAmount(unitAmountTarget.quantity)}{unitAmountTarget.unitName}라서 입력한 중량의 {formatAmount(unitAmountTarget.quantity)}배로 계산돼.
+              </p>
+            )}
+            <ModalActions onCancel={closeUnitAmountModal} submitText="등록" />
+          </form>
+        </Modal>
+      )}
 
       {amountTarget && (
         <Modal title={amountTarget.name + " 중량 등록"} onClose={closeAmountModal}>
