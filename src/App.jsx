@@ -92,6 +92,12 @@ const JOB_ACTIVITY_OPTIONS = [
 const BASE_FOOD_DB = [];
 const BUILT_IN_FOOD_ALIASES = [];
 
+const MEMO_EXAMPLE_ROWS = [
+  { time: "06:30", foods: "오트밀 80g, 바나나 1개, 계란 3개" },
+  { time: "12:30", foods: "밥 250g, 닭가슴살 200g, 브로콜리 100g" },
+  { time: "18:30", foods: "밥 200g, 연어 180g, 고구마 250g" },
+];
+
 
 function loadStoredSession() {
   try {
@@ -1911,11 +1917,17 @@ export default function App() {
   const calorieGraphColor = totals.kcal > calorieGoal ? "#ff5a4f" : "#66e36f";
 
   const memoRows = useMemo(() => splitDailyMemoRows(memoInput), [memoInput]);
-  const baseMemoRows = memoRows.length > 0 ? memoRows : [{ time: "", foods: "" }];
-  const lastMemoRow = baseMemoRows.at(-1) || { time: "", foods: "" };
-  const visibleMemoRows = !dayComplete && (lastMemoRow.time || lastMemoRow.foods)
-    ? [...baseMemoRows, { time: "", foods: "" }]
-    : baseMemoRows;
+  const hasMemoRows = memoInput.trim().length > 0;
+  const emptyGuideRows = MEMO_EXAMPLE_ROWS.map(() => ({ time: "", foods: "" }));
+  const baseMemoRows = hasMemoRows ? memoRows : emptyGuideRows;
+  const lastMemoRow = hasMemoRows ? (memoRows.at(-1) || { time: "", foods: "" }) : { time: "", foods: "" };
+  const visibleMemoRows = dayComplete
+    ? memoRows
+    : !hasMemoRows
+      ? emptyGuideRows
+      : (lastMemoRow.time || lastMemoRow.foods)
+        ? [...baseMemoRows, { time: "", foods: "" }]
+        : baseMemoRows;
   const activeMemoRow = visibleMemoRows[activeMemoRowIndex] || { time: "", foods: "" };
   const activeFoodCursor = Math.min(activeMemoFoodCursor, activeMemoRow.foods.length);
   const currentMemoBeforeCursor = activeMemoRow.foods.slice(0, activeFoodCursor);
@@ -2865,7 +2877,7 @@ export default function App() {
                   autoCorrect="off"
                   spellCheck={false}
                   disabled={dayComplete}
-                  placeholder={index === 0 ? "06:00" : ""}
+                  placeholder={MEMO_EXAMPLE_ROWS[index]?.time || ""}
                   aria-label={`${index + 1}번째 식사 시각`}
                 />
                 <input
@@ -2885,7 +2897,7 @@ export default function App() {
                   spellCheck={false}
                   enterKeyHint="enter"
                   disabled={dayComplete}
-                  placeholder={index === 0 ? "밥 400g, 닭가슴살 230g" : ""}
+                  placeholder={MEMO_EXAMPLE_ROWS[index]?.foods || ""}
                   aria-label={`${index + 1}번째 식사 음식`}
                 />
               </div>
@@ -3002,11 +3014,10 @@ export default function App() {
       )}
 
       {nutritionTarget && (
-        <Modal title={nutritionTarget.name + " 음식 연결/등록"} onClose={closeNutritionModal}>
+        <Modal title={nutritionTarget.name + " 음식 연결/등록"} onClose={closeNutritionModal} className="nutrition-modal">
           <form className="modal-form" onSubmit={saveNutrition}>
             {nutritionCandidateFoods.length > 0 && (
               <div className="alias-candidate-panel">
-                <p className="modal-hint">기존 DB에서 비슷한 음식을 골라 이번 항목에만 적용하거나, 앞으로도 이 이름으로 사용할 수 있어.</p>
                 <div className="alias-candidate-list">
                   {nutritionCandidateFoods.map((food) => (
                     <button
@@ -3015,14 +3026,13 @@ export default function App() {
                       className={food.isCurrentBasis ? "is-current-basis" : ""}
                       onClick={() => openNutritionMatchChoice(food)}
                     >
-                      <strong>{getFoodDisplayName(food)}{food.isCurrentBasis ? " · 현재 기준" : ""}</strong>
+                      <strong>{getFoodDisplayName(food)}</strong>
                       <span>100g {Math.round(food.kcal)}kcal · Carb {formatMacro(food.carb)}g · Pro {formatMacro(food.protein)}g · Fat {formatMacro(food.fat)}g</span>
                     </button>
                   ))}
                 </div>
               </div>
             )}
-            <p className="modal-hint">기존 DB에 맞는 음식이 없을 때만 직접 등록해. 입력한 기준 중량에 맞춰 100g 기준으로 자동 환산돼.</p>
             <div className="nutrition-manual-grid">
               <div className="nutrition-manual-row nutrition-manual-row-two">
                 <label>
@@ -3432,7 +3442,7 @@ function LineChart({ points, valueKey, unit, emptyText }) {
   };
 
   return (
-    <div className="weight-line-chart">
+    <div className="weight-line-chart" onClick={() => setSelectedIndex(null)}>
       <svg viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">
         <polyline points={polyline} />
       </svg>
@@ -3448,7 +3458,10 @@ function LineChart({ points, valueKey, unit, emptyText }) {
               type="button"
               style={{ left: x + "%", top: y + "%" }}
               aria-label={valueText + " / " + dateText}
-              onClick={() => setSelectedIndex((current) => (current === index ? null : index))}
+              onClick={(event) => {
+                event.stopPropagation();
+                setSelectedIndex((current) => (current === index ? null : index));
+              }}
             />
           );
         })}
@@ -4128,11 +4141,14 @@ function MealCard({ meal, onToggle, onEditMeal, onLongPress, onFoodLongPress, on
   return (
     <article className="meal-card">
       <header className="meal-header meal-header-clickable" {...longPressProps} onClick={onEditMeal}>
-        <div>
-          <strong>{meal.time}</strong>
-          <span className="meal-nutrition-summary">
-            {Math.round(mealTotals.kcal)} kcal · Carb {formatMacro(mealTotals.carb)}g · Pro {formatMacro(mealTotals.protein)}g · Fat {formatMacro(mealTotals.fat)}g
-          </span>
+        <div className="meal-header-main">
+          <strong className="meal-time">{meal.time}</strong>
+          <div className="meal-summary-inline">
+            <span className="meal-summary-kcal">{Math.round(mealTotals.kcal)} kcal</span>
+            <span className="meal-summary-macros">
+              탄 {formatMacro(mealTotals.carb)}g · 단 {formatMacro(mealTotals.protein)}g · 지 {formatMacro(mealTotals.fat)}g
+            </span>
+          </div>
         </div>
         <button
           type="button"
@@ -4247,10 +4263,10 @@ function FoodRow({ mealId, item, onLongPress, onOpenAmount, onOpenNutrition }) {
   );
 }
 
-function Modal({ title, children, onClose }) {
+function Modal({ title, children, onClose, className = "" }) {
   return (
     <div className="modal-backdrop" role="presentation" onClick={onClose}>
-      <div className="modal-card" role="dialog" aria-modal="true" onClick={(event) => event.stopPropagation()}>
+      <div className={`modal-card ${className}`.trim()} role="dialog" aria-modal="true" onClick={(event) => event.stopPropagation()}>
         <div className="modal-head">
           <strong>{title}</strong>
           <button type="button" onClick={onClose} aria-label="닫기">

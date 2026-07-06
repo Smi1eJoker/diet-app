@@ -3686,3 +3686,160 @@ textarea,
   -webkit-tap-highlight-color: transparent;
   touch-action: manipulation;
 }
+
+/* v16: mobile memo examples, compact meal header, larger food-link modal */
+.meal-header {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: start;
+}
+
+.meal-header-main {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 12px;
+  align-items: start;
+}
+
+.meal-time {
+  color: #f5f5f5;
+  font-size: 22px;
+  font-weight: 900;
+  line-height: 1.05;
+  white-space: nowrap;
+}
+
+.meal-summary-inline {
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+  padding-top: 2px;
+}
+
+.meal-summary-kcal {
+  color: #66e36f;
+  font-size: 15px;
+  font-weight: 900;
+  line-height: 1.1;
+}
+
+.meal-summary-macros {
+  color: #66e36f;
+  font-size: 12px;
+  font-weight: 800;
+  line-height: 1.25;
+  word-break: keep-all;
+  overflow-wrap: anywhere;
+}
+
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 20;
+  display: grid;
+  place-items: center;
+  padding: 12px;
+  background: rgba(0, 0, 0, 0.72);
+}
+
+.sheet-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 20;
+  display: grid;
+  place-items: end center;
+  padding: 18px;
+  background: rgba(0, 0, 0, 0.72);
+}
+
+.modal-card {
+  width: min(100%, 430px);
+  max-height: 88vh;
+  overflow-y: auto;
+  border: 1px solid #2a2a2a;
+  border-radius: 18px;
+  background: #121212;
+  box-shadow: 0 20px 45px rgba(0, 0, 0, 0.65);
+  padding: 16px;
+}
+
+.nutrition-modal {
+  width: min(100%, 430px);
+}
+
+.alias-candidate-panel {
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid #2a2a2a;
+  border-radius: 12px;
+  background: #181818;
+}
+
+.alias-candidate-list {
+  display: grid;
+  gap: 10px;
+  max-height: 320px;
+  overflow-y: auto;
+  padding-right: 2px;
+}
+
+.alias-candidate-list button {
+  width: 100%;
+  min-height: 64px;
+  display: grid;
+  gap: 6px;
+  padding: 12px 13px;
+  border: 1px solid #333333;
+  border-radius: 12px;
+  background: #121212;
+  color: #f5f5f5;
+  text-align: left;
+}
+
+.alias-candidate-list button strong {
+  font-size: 15px;
+  font-weight: 900;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+
+.alias-candidate-list button span {
+  color: #b8b8b8;
+  font-size: 13px;
+  font-weight: 800;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+
+.modal-hint {
+  display: none;
+}
+
+.weight-line-chart {
+  cursor: pointer;
+}
+
+.weight-points button {
+  cursor: pointer;
+}
+
+@media (max-width: 360px) {
+  .meal-header-main {
+    gap: 10px;
+  }
+
+  .meal-time {
+    font-size: 21px;
+  }
+
+  .meal-summary-kcal {
+    font-size: 14px;
+  }
+
+  .meal-summary-macros {
+    font-size: 11px;
+  }
+}
