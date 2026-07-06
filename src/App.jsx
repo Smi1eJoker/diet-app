@@ -1354,7 +1354,7 @@ function parseMemoLine(line, customFoods) {
 }
 
 function itemToMemoLine(item) {
-  const memoName = String(item.inputName || item.name || "").trim();
+  const memoName = formatMemoItemName(item.inputName || item.name || "");
 
   if (item.displayUnit && toNumber(item.displayAmount) > 0) {
     return memoName + " " + formatAmount(toNumber(item.displayAmount)) + item.displayUnit;
@@ -1541,6 +1541,25 @@ function splitFoodSegments(text) {
   return segments;
 }
 
+
+function normalizeMemoFoodSegment(value) {
+  return String(value || "")
+    .trim()
+    // 모바일 입력/이전 파싱 오류로 "420g"이 "4 20g"처럼 갈라진 경우 복구한다.
+    // 예: "밥 4 20g" -> "밥 420g", "닭가슴살 1 80g" -> "닭가슴살 180g"
+    .replace(/(\d)\s+(\d+(?:\.\d+)?)(?=\s*(?:g|그램)\b)/gi, "$1$2")
+    // 단위 앞 공백은 정리한다. 예: "200 g" -> "200g"
+    .replace(/(\d+(?:\.\d+)?)\s+(g|그램)\b/gi, "$1$2")
+    .replace(/\s{2,}/g, " ")
+    .trim();
+}
+
+function formatMemoItemName(value) {
+  return String(value || "")
+    .replace(/\s{2,}/g, " ")
+    .trim();
+}
+
 function parseFoodEntries(text, customFoods, options = {}) {
   const entries = [];
   const rowIndex = options.rowIndex ?? 0;
@@ -1605,7 +1624,7 @@ function parseFoodEntries(text, customFoods, options = {}) {
   };
 
   splitFoodSegments(text).forEach((segment, segmentIndex) => {
-    const source = String(segment || "").trim();
+    const source = normalizeMemoFoodSegment(segment);
     if (!source) return;
     let entryIndex = 0;
 
