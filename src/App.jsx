@@ -3645,7 +3645,8 @@ export default function App() {
 
   return (
     <main className="app-shell">
-      <section className="top-panel" aria-label="오늘 식단 요약">
+      {activeTab !== "foods" && (
+        <section className="top-panel" aria-label="오늘 식단 요약">
         <div className="date-row date-nav-row compact-date-row">
           <button className="calendar-open-button" type="button" onClick={() => setCalendarOpen(true)} aria-label="달력 열기">
             📅
@@ -3682,7 +3683,8 @@ export default function App() {
             <MacroBar label="지방" value={totals.fat} target={macroTargets.fat} />
           </div>
         </div>
-      </section>
+        </section>
+      )}
 
       {activeTab === "record" && (
         <>
@@ -4308,17 +4310,6 @@ function StatsScreen({ stats, plan, totals }) {
 
   return (
     <section className="stats-screen" aria-label="통계">
-      <div className="stats-card">
-        <div className="section-title">
-          <strong>목표 달성률</strong>
-          <small>{plan.calorieGoal.toLocaleString()} kcal 기준</small>
-        </div>
-        <StatsBar label="칼로리" value={stats.currentKcal} target={plan.calorieGoal} />
-        <StatsBar label="탄수화물" value={totals.carb} target={plan.macroTargets.carb} unit="g" />
-        <StatsBar label="단백질" value={totals.protein} target={plan.macroTargets.protein} unit="g" />
-        <StatsBar label="지방" value={totals.fat} target={plan.macroTargets.fat} unit="g" />
-      </div>
-
       <div className="stats-card weight-chart-card">
         <div className="section-title chart-title-row">
           <strong>일 섭취 칼로리</strong>
