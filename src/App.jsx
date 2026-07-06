@@ -1918,13 +1918,15 @@ export default function App() {
 
   const memoRows = useMemo(() => splitDailyMemoRows(memoInput), [memoInput]);
   const hasMemoRows = memoInput.trim().length > 0;
+  const shouldShowMemoExamples = !dayComplete && !hasMemoRows && meals.length === 0;
   const emptyGuideRows = MEMO_EXAMPLE_ROWS.map(() => ({ time: "", foods: "" }));
-  const baseMemoRows = hasMemoRows ? memoRows : emptyGuideRows;
+  const emptyInputRows = [{ time: "", foods: "" }];
+  const baseMemoRows = hasMemoRows ? memoRows : shouldShowMemoExamples ? emptyGuideRows : emptyInputRows;
   const lastMemoRow = hasMemoRows ? (memoRows.at(-1) || { time: "", foods: "" }) : { time: "", foods: "" };
   const visibleMemoRows = dayComplete
     ? memoRows
     : !hasMemoRows
-      ? emptyGuideRows
+      ? baseMemoRows
       : (lastMemoRow.time || lastMemoRow.foods)
         ? [...baseMemoRows, { time: "", foods: "" }]
         : baseMemoRows;
@@ -2877,7 +2879,7 @@ export default function App() {
                   autoCorrect="off"
                   spellCheck={false}
                   disabled={dayComplete}
-                  placeholder={MEMO_EXAMPLE_ROWS[index]?.time || ""}
+                  placeholder={shouldShowMemoExamples ? (MEMO_EXAMPLE_ROWS[index]?.time || "") : ""}
                   aria-label={`${index + 1}번째 식사 시각`}
                 />
                 <input
@@ -2897,7 +2899,7 @@ export default function App() {
                   spellCheck={false}
                   enterKeyHint="enter"
                   disabled={dayComplete}
-                  placeholder={MEMO_EXAMPLE_ROWS[index]?.foods || ""}
+                  placeholder={shouldShowMemoExamples ? (MEMO_EXAMPLE_ROWS[index]?.foods || "") : ""}
                   aria-label={`${index + 1}번째 식사 음식`}
                 />
               </div>

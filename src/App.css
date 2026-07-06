@@ -4127,3 +4127,15 @@ textarea,
     font-size: 10px;
   }
 }
+
+
+/* v18: 시간과 영양성분 사이 공백 살짝 추가 */
+.meal-header-main {
+  column-gap: 14px !important;
+}
+
+@media (max-width: 380px) {
+  .meal-header-main {
+    column-gap: 11px !important;
+  }
+}
