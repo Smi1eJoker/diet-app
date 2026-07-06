@@ -1078,7 +1078,7 @@ button {
   transform: translateX(-50%);
   width: min(calc(100% - 36px), 394px);
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 6px;
   padding: 7px;
   border: 1px solid #2a2a2a;
@@ -3637,7 +3637,7 @@ select {
 
 .app-footer-actions .bottom-nav {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
 }
 
 /* v15: prevent iOS long-press text selection/callout on app controls */
@@ -4140,26 +4140,117 @@ textarea,
   }
 }
 
-.nutrition-alias-check {
-  display: flex !important;
+
+/* v17: my foods management tab */
+.my-foods-screen {
+  display: grid;
+  gap: 12px;
+  padding-top: 10px;
+}
+
+.my-foods-head {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 12px;
   align-items: center;
-  gap: 9px;
-  min-height: 38px;
-  padding: 8px 10px;
-  border: 1px solid #303030;
-  border-radius: 11px;
+  padding: 15px;
+  border: 1px solid #2a2a2a;
+  border-radius: 16px;
+  background: #121212;
+}
+
+.my-foods-head div {
+  min-width: 0;
+  display: grid;
+  gap: 4px;
+}
+
+.my-foods-head span {
+  color: #a3a3a3;
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.my-foods-head strong {
+  color: #f5f5f5;
+  font-size: 22px;
+  font-weight: 900;
+}
+
+.my-foods-head p {
+  margin: 0;
+  color: #a3a3a3;
+  font-size: 12px;
+  font-weight: 800;
+  line-height: 1.35;
+}
+
+.my-foods-head .primary-button {
+  width: 66px;
+}
+
+.my-food-list {
+  display: grid;
+  gap: 10px;
+}
+
+.my-food-card {
+  display: grid;
+  gap: 8px;
+  padding: 12px;
+  border: 1px solid #252525;
+  border-radius: 14px;
   background: #181818;
 }
 
-.nutrition-alias-check input {
-  width: 16px !important;
-  height: 16px !important;
-  flex: 0 0 auto;
-  margin: 0;
+.my-food-main {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
 }
 
-.nutrition-alias-check span {
+.my-food-main strong {
+  min-width: 0;
+  color: #f5f5f5;
+  font-size: 15px;
+  font-weight: 900;
+  overflow-wrap: anywhere;
+}
+
+.my-food-main span,
+.my-food-macros {
   color: #b8b8b8;
   font-size: 12px;
+  font-weight: 800;
+}
+
+.my-food-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+.my-food-actions button {
+  min-height: 34px;
+  border: 1px solid #333333;
+  border-radius: 10px;
+  background: #121212;
+  color: #f5f5f5;
+  font-size: 12px;
   font-weight: 900;
+}
+
+.my-food-actions .danger-button {
+  border-color: #ff5a4f;
+  color: #ff5a4f;
+}
+
+.my-foods-screen,
+.my-food-card,
+.my-food-actions,
+.my-food-actions button {
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
 }

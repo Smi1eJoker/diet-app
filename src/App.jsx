@@ -421,6 +421,58 @@ async function upsertUserAlias(session, aliasText, food) {
   return Array.isArray(rows) && rows[0] ? rows[0] : payload;
 }
 
+async function updateUserFood(session, userFoodId, food) {
+  const userId = getSessionUserId(session);
+  if (!userId) throw new Error("사용자 정보를 확인하지 못했어.");
+  if (!userFoodId) throw new Error("수정할 개인 음식 ID를 확인하지 못했어.");
+
+  const payload = {
+    food_name: cleanFoodName(food.name || food.food_name),
+    base_amount: toNumber(food.base_amount ?? food.base_amount_g) || 100,
+    base_unit: food.base_unit || "g",
+    kcal: toNumber(food.kcal),
+    carb_g: toNumber(food.carb_g ?? food.carb),
+    protein_g: toNumber(food.protein_g ?? food.protein),
+    fat_g: toNumber(food.fat_g ?? food.fat),
+  };
+
+  const rows = await requestSupabaseRest(
+    "/user_foods?user_id=eq." + encodeURIComponent(userId) + "&user_food_id=eq." + encodeURIComponent(userFoodId),
+    {
+      method: "PATCH",
+      body: payload,
+      prefer: "return=representation",
+    },
+    session?.access_token
+  );
+
+  return Array.isArray(rows) && rows[0] ? rows[0] : { ...payload, user_id: userId, user_food_id: userFoodId };
+}
+
+async function deleteUserFood(session, food) {
+  const userId = getSessionUserId(session);
+  if (!userId) throw new Error("사용자 정보를 확인하지 못했어.");
+
+  const userFoodId = food?.userFoodId || food?.user_food_id || null;
+  if (!userFoodId) return;
+
+  const encodedUserId = encodeURIComponent(userId);
+  const encodedFoodId = encodeURIComponent(userFoodId);
+
+  // 개인 음식에 연결된 별칭을 먼저 지워야 FK 제약이 있어도 안전하다.
+  await requestSupabaseRest(
+    "/user_aliases?user_id=eq." + encodedUserId + "&user_food_id=eq." + encodedFoodId,
+    { method: "DELETE", prefer: "return=minimal" },
+    session?.access_token
+  );
+
+  await requestSupabaseRest(
+    "/user_foods?user_id=eq." + encodedUserId + "&user_food_id=eq." + encodedFoodId,
+    { method: "DELETE", prefer: "return=minimal" },
+    session?.access_token
+  );
+}
+
 
 async function fetchUserAppState(session) {
   const userId = getSessionUserId(session);
@@ -864,6 +916,100 @@ function applyManualTargets(plan, targets) {
 
 function getBuiltInAliasFoods() {
   return [];
+}
+
+function getManagedUserFoods(customFoods) {
+  const seen = new Set();
+
+  return Object.values(customFoods || {})
+    .filter((food) => {
+      if (!food) return false;
+      if (food.source === "user_alias") return false;
+      return food.source === "user_food" || Boolean(food.userFoodId) || String(food.id || "").startsWith("custom-");
+    })
+    .filter((food) => {
+      const key = food.userFoodId ? "id:" + food.userFoodId : "name:" + normalize(food.name);
+      if (!key || seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    })
+    .sort((a, b) => getFoodDisplayName(a).localeCompare(getFoodDisplayName(b), "ko-KR"));
+}
+
+function makeUserFoodFormFromFood(food) {
+  return {
+    name: getFoodDisplayName(food),
+    baseAmount: "100",
+    kcal: food ? String(Math.round(toNumber(food.kcal))) : "",
+    carb: food ? formatMacro(toNumber(food.carb)) : "",
+    protein: food ? formatMacro(toNumber(food.protein)) : "",
+    fat: food ? formatMacro(toNumber(food.fat)) : "",
+  };
+}
+
+function getPreparedUserFoodFromForm(form) {
+  const foodName = cleanFoodName(form.name);
+  const baseAmount = toNumber(form.baseAmount) || 100;
+  const per100Rate = baseAmount > 0 ? 100 / baseAmount : 1;
+
+  return {
+    id: "custom-" + normalize(foodName),
+    name: foodName,
+    kcal: toNumber(form.kcal) * per100Rate,
+    carb: toNumber(form.carb) * per100Rate,
+    protein: toNumber(form.protein) * per100Rate,
+    fat: toNumber(form.fat) * per100Rate,
+    source: "user_food",
+    base_amount: 100,
+    base_unit: "g",
+  };
+}
+
+function mergeManagedUserFood(currentFoods, previousFood, storedFood) {
+  const nextFoods = { ...currentFoods };
+  const previousKey = normalize(previousFood?.name || "");
+  const nextKey = normalize(storedFood?.name || "");
+
+  if (previousKey && previousKey !== nextKey) {
+    delete nextFoods[previousKey];
+  }
+
+  if (nextKey) {
+    nextFoods[nextKey] = storedFood;
+  }
+
+  if (previousFood?.userFoodId) {
+    Object.entries(nextFoods).forEach(([key, food]) => {
+      if (food?.source !== "user_alias") return;
+      if (String(food.userFoodId) !== String(previousFood.userFoodId)) return;
+
+      nextFoods[key] = {
+        ...food,
+        userFoodId: storedFood.userFoodId || food.userFoodId,
+        canonicalName: getFoodDisplayName(storedFood),
+        kcal: storedFood.kcal,
+        carb: storedFood.carb,
+        protein: storedFood.protein,
+        fat: storedFood.fat,
+      };
+    });
+  }
+
+  return nextFoods;
+}
+
+function removeManagedUserFoodFromMap(currentFoods, foodToRemove) {
+  const nextFoods = { ...currentFoods };
+  const removeKey = normalize(foodToRemove?.name || "");
+  const removeUserFoodId = foodToRemove?.userFoodId || null;
+
+  Object.entries(nextFoods).forEach(([key, food]) => {
+    const sameName = removeKey && normalize(food?.name || "") === removeKey;
+    const sameUserFood = removeUserFoodId && String(food?.userFoodId || "") === String(removeUserFoodId);
+    if (sameName || sameUserFood) delete nextFoods[key];
+  });
+
+  return nextFoods;
 }
 
 function getFoodPool(customFoods) {
@@ -1935,15 +2081,11 @@ export default function App() {
   const [formError, setFormError] = useState("");
   const [nutritionTarget, setNutritionTarget] = useState(null);
   const [matchChoiceTarget, setMatchChoiceTarget] = useState(null);
-  const [nutritionForm, setNutritionForm] = useState({
-    foodName: "",
-    baseAmount: "100",
-    kcal: "",
-    carb: "",
-    protein: "",
-    fat: "",
-    saveAlias: true,
-  });
+  const [nutritionForm, setNutritionForm] = useState({ baseAmount: "100", kcal: "", carb: "", protein: "", fat: "" });
+  const [myFoodEditTarget, setMyFoodEditTarget] = useState(null);
+  const [myFoodModalOpen, setMyFoodModalOpen] = useState(false);
+  const [myFoodForm, setMyFoodForm] = useState({ name: "", baseAmount: "100", kcal: "", carb: "", protein: "", fat: "" });
+  const [myFoodError, setMyFoodError] = useState("");
   const [amountTarget, setAmountTarget] = useState(null);
   const [amountInput, setAmountInput] = useState("");
   const [unitAmountTarget, setUnitAmountTarget] = useState(null);
@@ -2314,6 +2456,7 @@ export default function App() {
   const sortedMeals = useMemo(() => sortMealsLatestFirst(meals), [meals]);
   const totals = useMemo(() => calculateTotals(meals), [meals]);
   const stats = useMemo(() => buildStats(meals, activePlan, morningWeight, dailyRecords, selectedDate), [meals, activePlan, morningWeight, dailyRecords, selectedDate]);
+  const managedUserFoods = useMemo(() => getManagedUserFoods(customFoods), [customFoods]);
 
   useEffect(() => {
     if (!authSession || !cloudSyncReady || !HAS_SUPABASE_CONFIG) return;
@@ -3078,40 +3221,26 @@ export default function App() {
 
   const openNutritionModal = (mealId, item) => {
     const currentFood = getItemBasisFood(item);
-    const inputFoodName = formatMemoItemName(item.inputName || item.name || "");
-
     setNutritionTarget({
       mealId,
       itemId: item.id,
       name: item.name,
-      inputName: inputFoodName,
       amount: item.amount,
       currentFood,
     });
-
     setNutritionForm({
-      foodName: inputFoodName || item.name,
       baseAmount: "100",
       kcal: currentFood ? String(Math.round(toNumber(currentFood.kcal))) : "",
       carb: currentFood ? formatMacro(toNumber(currentFood.carb)) : "",
       protein: currentFood ? formatMacro(toNumber(currentFood.protein)) : "",
       fat: currentFood ? formatMacro(toNumber(currentFood.fat)) : "",
-      saveAlias: true,
     });
   };
 
   const closeNutritionModal = () => {
     setNutritionTarget(null);
     setMatchChoiceTarget((current) => current?.source === "nutrition" ? null : current);
-    setNutritionForm({
-      foodName: "",
-      baseAmount: "100",
-      kcal: "",
-      carb: "",
-      protein: "",
-      fat: "",
-      saveAlias: true,
-    });
+    setNutritionForm({ baseAmount: "100", kcal: "", carb: "", protein: "", fat: "" });
   };
 
   const openFoodBasisModal = (mealId, foodId) => {
@@ -3126,25 +3255,18 @@ export default function App() {
     event.preventDefault();
     if (!nutritionTarget) return;
 
-    const aliasName = cleanFoodName(nutritionTarget.name);
-    const foodName = cleanFoodName(nutritionForm.foodName || nutritionTarget.inputName || nutritionTarget.name);
     const baseAmount = toNumber(nutritionForm.baseAmount) || 100;
-
-    if (!foodName || baseAmount <= 0) return;
-
-    const per100Rate = 100 / baseAmount;
-
+    const per100Rate = baseAmount > 0 ? 100 / baseAmount : 1;
     const food = {
-      id: "custom-" + normalize(foodName),
-      name: foodName,
+      id: "custom-" + normalize(nutritionTarget.name),
+      name: cleanFoodName(nutritionTarget.name),
       kcal: toNumber(nutritionForm.kcal) * per100Rate,
       carb: toNumber(nutritionForm.carb) * per100Rate,
       protein: toNumber(nutritionForm.protein) * per100Rate,
       fat: toNumber(nutritionForm.fat) * per100Rate,
-      source: "user_food",
     };
 
-    if (food.kcal <= 0) return;
+    if (baseAmount <= 0 || food.kcal <= 0) return;
 
     let storedFood = food;
 
@@ -3152,69 +3274,112 @@ export default function App() {
       try {
         const savedRow = await upsertUserFood(authSession, {
           ...food,
-          base_amount: 100,
-          base_unit: "g",
+          base_amount_g: 100,
         });
-
         storedFood = toFoodEntry(savedRow, food.id);
       } catch (error) {
         console.warn("개인 음식 DB 저장 실패, 로컬 반영 유지:", error);
       }
     }
 
-    let nextCustomFoods = {
-      ...customFoods,
-      [normalize(storedFood.name)]: storedFood,
-    };
+    const nextCustomFoods = { ...customFoods, [normalize(storedFood.name)]: storedFood };
+    setCustomFoods(nextCustomFoods);
+    updateMatchingItems((item) =>
+      normalize(item.name) === normalize(storedFood.name) ? resolveItem(item, nextCustomFoods) : item
+    );
+    closeNutritionModal();
+  };
 
-    if (nutritionForm.saveAlias && aliasName) {
-      const aliasFood = {
-        ...storedFood,
-        id: "local-alias-" + normalize(aliasName),
-        name: aliasName,
-        canonicalName: getFoodDisplayName(storedFood),
-        source: "user_alias",
-      };
+  const openNewMyFoodModal = () => {
+    setMyFoodEditTarget(null);
+    setMyFoodError("");
+    setMyFoodForm({ name: "", baseAmount: "100", kcal: "", carb: "", protein: "", fat: "" });
+    setMyFoodModalOpen(true);
+  };
 
-      nextCustomFoods = {
-        ...nextCustomFoods,
-        [normalize(aliasName)]: aliasFood,
-      };
+  const openEditMyFoodModal = (food) => {
+    setMyFoodEditTarget(food || null);
+    setMyFoodError("");
+    setMyFoodForm(makeUserFoodFormFromFood(food));
+    setMyFoodModalOpen(true);
+  };
 
-      if (HAS_SUPABASE_CONFIG && authSession) {
-        try {
-          await upsertUserAlias(authSession, aliasName, storedFood);
-        } catch (error) {
-          console.warn("개인 음식 별칭 저장 실패, 로컬 반영 유지:", error);
-        }
+  const closeMyFoodModal = () => {
+    setMyFoodEditTarget(null);
+    setMyFoodModalOpen(false);
+    setMyFoodError("");
+    setMyFoodForm({ name: "", baseAmount: "100", kcal: "", carb: "", protein: "", fat: "" });
+  };
+
+  const saveMyFood = async (event) => {
+    event.preventDefault();
+    setMyFoodError("");
+
+    const preparedFood = getPreparedUserFoodFromForm(myFoodForm);
+    const baseAmount = toNumber(myFoodForm.baseAmount) || 100;
+
+    if (!preparedFood.name) {
+      setMyFoodError("음식명을 입력해줘.");
+      return;
+    }
+
+    if (baseAmount <= 0) {
+      setMyFoodError("기준량은 1g 이상이어야 해.");
+      return;
+    }
+
+    if (preparedFood.kcal <= 0) {
+      setMyFoodError("kcal를 입력해야 저장할 수 있어.");
+      return;
+    }
+
+    let storedFood = preparedFood;
+
+    if (HAS_SUPABASE_CONFIG && authSession) {
+      try {
+        const savedRow = myFoodEditTarget?.userFoodId
+          ? await updateUserFood(authSession, myFoodEditTarget.userFoodId, preparedFood)
+          : await upsertUserFood(authSession, preparedFood);
+        storedFood = toFoodEntry(savedRow, preparedFood.id);
+      } catch (error) {
+        setMyFoodError(error.message || "개인 음식 저장에 실패했어.");
+        return;
       }
     }
 
-    setCustomFoods(nextCustomFoods);
+    setCustomFoods((current) => mergeManagedUserFood(current, myFoodEditTarget, storedFood));
 
-    setMeals((current) =>
-      current.map((meal) => ({
+    // 현재 날짜 기록 중 이 개인 음식으로 계산된 항목은 새 영양값으로만 갱신한다.
+    // 음식명/표시 단위는 사용자가 입력한 그대로 유지한다.
+    setMeals((currentMeals) =>
+      currentMeals.map((meal) => ({
         ...meal,
         items: meal.items.map((item) => {
-          const isCurrentTarget =
-            meal.id === nutritionTarget.mealId &&
-            item.id === nutritionTarget.itemId;
-
-          const isSameUnresolvedName =
-            !item.per100 &&
-            aliasName &&
-            normalize(item.name) === normalize(aliasName);
-
-          if (isCurrentTarget || isSameUnresolvedName) {
-            return applyFoodBasisToItem(item, storedFood);
-          }
-
-          return item;
+          const sameFoodId = myFoodEditTarget?.id && item.foodId === myFoodEditTarget.id;
+          const sameMatchedName = myFoodEditTarget?.name && normalize(item.matchedFoodName) === normalize(myFoodEditTarget.name);
+          const sameInputName = myFoodEditTarget?.name && normalize(item.name) === normalize(myFoodEditTarget.name);
+          return sameFoodId || sameMatchedName || sameInputName ? applyFoodBasisToItem(item, storedFood) : item;
         }),
       }))
     );
 
-    closeNutritionModal();
+    closeMyFoodModal();
+  };
+
+  const removeMyFood = async (food) => {
+    if (!food) return;
+    if (!window.confirm(getFoodDisplayName(food) + "을 나의 음식에서 삭제할까?")) return;
+
+    if (HAS_SUPABASE_CONFIG && authSession && food.userFoodId) {
+      try {
+        await deleteUserFood(authSession, food);
+      } catch (error) {
+        setFoodDbError(error.message || "개인 음식 삭제에 실패했어.");
+        return;
+      }
+    }
+
+    setCustomFoods((current) => removeManagedUserFoodFromMap(current, food));
   };
 
   const openMemoMatchChoice = (food) => {
@@ -3519,7 +3684,7 @@ export default function App() {
         </div>
       </section>
 
-      {activeTab === "record" ? (
+      {activeTab === "record" && (
         <>
       <MorningWeightCard
         value={morningWeight}
@@ -3651,8 +3816,19 @@ export default function App() {
         )}
       </section>
         </>
-      ) : (
+      )}
+
+      {activeTab === "stats" && (
         <StatsScreen stats={stats} plan={activePlan} totals={totals} />
+      )}
+
+      {activeTab === "foods" && (
+        <MyFoodsScreen
+          foods={managedUserFoods}
+          onAdd={openNewMyFoodModal}
+          onEdit={openEditMyFoodModal}
+          onDelete={removeMyFood}
+        />
       )}
 
       <div className="app-footer-actions">
@@ -3668,6 +3844,80 @@ export default function App() {
         )}
         <BottomNav activeTab={activeTab} onChange={setActiveTab} />
       </div>
+
+      {myFoodModalOpen && (
+        <Modal title={myFoodEditTarget ? "나의 음식 수정" : "나의 음식 추가"} onClose={closeMyFoodModal}>
+          <form className="modal-form" onSubmit={saveMyFood}>
+            <label>
+              <span>음식명</span>
+              <input
+                value={myFoodForm.name}
+                onChange={(event) => setMyFoodForm((current) => ({ ...current, name: event.target.value }))}
+                placeholder="예: 제육"
+                lang="ko-KR"
+                autoCapitalize="off"
+              />
+            </label>
+            <div className="nutrition-manual-row nutrition-manual-row-two">
+              <label>
+                <span>기준 중량(g)</span>
+                <input
+                  value={myFoodForm.baseAmount}
+                  onChange={(event) => setMyFoodForm((current) => ({ ...current, baseAmount: event.target.value }))}
+                  type="number"
+                  min="1"
+                  step="1"
+                  placeholder="예: 100"
+                />
+              </label>
+              <label>
+                <span>kcal</span>
+                <input
+                  value={myFoodForm.kcal}
+                  onChange={(event) => setMyFoodForm((current) => ({ ...current, kcal: event.target.value }))}
+                  type="number"
+                  min="0"
+                  step="1"
+                />
+              </label>
+            </div>
+            <div className="nutrition-manual-row nutrition-manual-row-three">
+              <label>
+                <span>Carb</span>
+                <input
+                  value={myFoodForm.carb}
+                  onChange={(event) => setMyFoodForm((current) => ({ ...current, carb: event.target.value }))}
+                  type="number"
+                  min="0"
+                  step="0.1"
+                />
+              </label>
+              <label>
+                <span>Pro</span>
+                <input
+                  value={myFoodForm.protein}
+                  onChange={(event) => setMyFoodForm((current) => ({ ...current, protein: event.target.value }))}
+                  type="number"
+                  min="0"
+                  step="0.1"
+                />
+              </label>
+              <label>
+                <span>Fat</span>
+                <input
+                  value={myFoodForm.fat}
+                  onChange={(event) => setMyFoodForm((current) => ({ ...current, fat: event.target.value }))}
+                  type="number"
+                  min="0"
+                  step="0.1"
+                />
+              </label>
+            </div>
+            {myFoodError && <p className="form-error">{myFoodError}</p>}
+            <ModalActions onCancel={closeMyFoodModal} submitText={myFoodEditTarget ? "수정" : "추가"} />
+          </form>
+        </Modal>
+      )}
 
       {unitAmountTarget && (
         <Modal title={unitAmountTarget.foodName + " " + unitAmountTarget.unitName + " 중량 등록"} onClose={closeUnitAmountModal}>
@@ -3739,36 +3989,6 @@ export default function App() {
               </div>
             )}
             <div className="nutrition-manual-grid">
-              <label>
-                <span>음식명</span>
-                <input
-                  value={nutritionForm.foodName}
-                  onChange={(event) =>
-                    setNutritionForm((current) => ({
-                      ...current,
-                      foodName: event.target.value,
-                    }))
-                  }
-                  placeholder="예: 제육"
-                  lang="ko"
-                  autoCapitalize="off"
-                />
-              </label>
-
-              <label className="nutrition-alias-check">
-                <input
-                  type="checkbox"
-                  checked={nutritionForm.saveAlias}
-                  onChange={(event) =>
-                    setNutritionForm((current) => ({
-                      ...current,
-                      saveAlias: event.target.checked,
-                    }))
-                  }
-                />
-                <span>현재 입력명도 다음부터 자동 계산</span>
-              </label>
-
               <div className="nutrition-manual-row nutrition-manual-row-two">
                 <label>
                   <span>기준 중량(g)</span>
@@ -4248,7 +4468,51 @@ function BottomNav({ activeTab, onChange }) {
         <span>▥</span>
         통계
       </button>
+      <button className={activeTab === "foods" ? "is-active" : ""} type="button" onClick={() => onChange("foods")}>
+        <span>▦</span>
+        나의 음식
+      </button>
     </nav>
+  );
+}
+
+function MyFoodsScreen({ foods, onAdd, onEdit, onDelete }) {
+  return (
+    <section className="my-foods-screen" aria-label="나의 음식">
+      <div className="my-foods-head">
+        <div>
+          <span>개인 음식 DB</span>
+          <strong>나의 음식</strong>
+          <p>직접 등록한 음식은 다음 메모 입력부터 자동 계산돼.</p>
+        </div>
+        <button type="button" className="primary-button" onClick={onAdd}>추가</button>
+      </div>
+
+      {foods.length === 0 ? (
+        <div className="empty-state">
+          <strong>아직 저장한 음식이 없어.</strong>
+          <span>식단 카드의 음식 연결/등록에서 추가하거나 여기서 직접 추가해.</span>
+        </div>
+      ) : (
+        <div className="my-food-list">
+          {foods.map((food) => (
+            <article className="my-food-card" key={food.userFoodId || food.id || food.name}>
+              <div className="my-food-main">
+                <strong>{getFoodDisplayName(food)}</strong>
+                <span>100g {Math.round(food.kcal)}kcal</span>
+              </div>
+              <div className="my-food-macros">
+                C {formatMacro(food.carb)}g · P {formatMacro(food.protein)}g · F {formatMacro(food.fat)}g
+              </div>
+              <div className="my-food-actions">
+                <button type="button" onClick={() => onEdit(food)}>수정</button>
+                <button type="button" className="danger-button" onClick={() => onDelete(food)}>삭제</button>
+              </div>
+            </article>
+          ))}
+        </div>
+      )}
+    </section>
   );
 }
 
