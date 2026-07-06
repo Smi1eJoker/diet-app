@@ -1354,11 +1354,13 @@ function parseMemoLine(line, customFoods) {
 }
 
 function itemToMemoLine(item) {
+  const memoName = String(item.inputName || item.name || "").trim();
+
   if (item.displayUnit && toNumber(item.displayAmount) > 0) {
-    return item.name + " " + formatAmount(toNumber(item.displayAmount)) + item.displayUnit;
+    return memoName + " " + formatAmount(toNumber(item.displayAmount)) + item.displayUnit;
   }
 
-  return item.name + (item.amount > 0 ? " " + formatAmount(item.amount) + "g" : "");
+  return memoName + (item.amount > 0 ? " " + formatAmount(item.amount) + "g" : "");
 }
 
 function getUnsupportedUnitItem(items) {
@@ -1405,6 +1407,7 @@ function createUnsupportedOrOverrideItem(name, quantity, unitText, customFoods, 
         displayAmount: quantity,
         displayUnit: unitText,
         unitGramOverride: unitGrams,
+        inputName: String(name || "").trim(),
       }
     );
   }
@@ -1421,6 +1424,7 @@ function createUnsupportedOrOverrideItem(name, quantity, unitText, customFoods, 
       displayUnit: unitText,
       unsupportedUnit: true,
       unsupportedUnitName: unitText,
+      inputName: String(name || "").trim(),
     }
   );
 }
@@ -1543,6 +1547,54 @@ function parseFoodEntries(text, customFoods, options = {}) {
   const basisMap = options.basisMap || {};
   const unitOverrides = options.unitOverrides || {};
 
+  const makeNameFromTokens = (tokens) => tokens.join(" ").trim();
+
+  const pushGramEntry = (name, amount, segmentIndex, entryIndex) => {
+    const inputName = String(name || "").trim();
+    const cleanName = cleanFoodName(inputName);
+    const cleanAmount = toNumber(amount);
+    if (!cleanName || cleanAmount <= 0) return false;
+
+    const basisFood = getMemoFoodBasis(basisMap, rowIndex, segmentIndex, entryIndex, cleanName);
+    entries.push(createItem(cleanName, cleanAmount, customFoods, inputName + " " + cleanAmount + "g", undefined, basisFood, { inputName }));
+    return true;
+  };
+
+  const pushUnitEntry = (name, quantity, unitText, segmentIndex, entryIndex) => {
+    const inputName = String(name || "").trim();
+    const cleanName = cleanFoodName(inputName);
+    const cleanQuantity = toNumber(quantity);
+    if (!cleanName || cleanQuantity <= 0 || !unitText) return false;
+
+    const basisFood = getMemoFoodBasis(basisMap, rowIndex, segmentIndex, entryIndex, cleanName);
+    const unitInfo = resolveFoodUnitInfo(cleanName, cleanQuantity, unitText, customFoods, basisFood);
+    const rawLine = inputName + " " + formatAmount(cleanQuantity) + unitText;
+
+    if (unitInfo) {
+      entries.push(createItem(
+        cleanName,
+        unitInfo.amount,
+        customFoods,
+        rawLine,
+        undefined,
+        unitInfo.food || basisFood,
+        { displayAmount: cleanQuantity, displayUnit: unitText, inputName }
+      ));
+      return true;
+    }
+
+    entries.push(createUnsupportedOrOverrideItem(
+      inputName,
+      cleanQuantity,
+      unitText,
+      customFoods,
+      rawLine,
+      basisFood,
+      unitOverrides
+    ));
+    return true;
+  };
+
   splitFoodSegments(text)
     .forEach((segment, segmentIndex) => {
       const tokens = segment.split(/\s+/).filter(Boolean);
@@ -1550,112 +1602,57 @@ function parseFoodEntries(text, customFoods, options = {}) {
       let entryIndex = 0;
 
       while (index < tokens.length) {
-        const token = tokens[index];
-        const attachedAmount = token.match(/^(.+?)([0-9]+(?:\.[0-9]+)?)(?:g|그램)$/i);
+        let handled = false;
 
-        if (attachedAmount) {
-          const name = cleanFoodName(attachedAmount[1]);
-          const amount = toNumber(attachedAmount[2]);
-          const basisFood = getMemoFoodBasis(basisMap, rowIndex, segmentIndex, entryIndex, name);
-          if (name) entries.push(createItem(name, amount, customFoods, name + " " + amount + "g", undefined, basisFood));
-          entryIndex += 1;
-          index += 1;
-          continue;
-        }
+        for (let measureIndex = index; measureIndex < tokens.length; measureIndex += 1) {
+          const token = tokens[measureIndex];
+          const nextToken = tokens[measureIndex + 1] || "";
 
-        const attachedUnit = parseAttachedFoodUnitToken(token);
-        if (attachedUnit?.name) {
-          const basisFood = getMemoFoodBasis(basisMap, rowIndex, segmentIndex, entryIndex, attachedUnit.name);
-          const unitInfo = resolveFoodUnitInfo(
-            attachedUnit.name,
-            attachedUnit.quantity,
-            attachedUnit.unitText,
-            customFoods,
-            basisFood
-          );
-
-          if (unitInfo) {
-            entries.push(createItem(
-              attachedUnit.name,
-              unitInfo.amount,
-              customFoods,
-              attachedUnit.name + " " + formatAmount(attachedUnit.quantity) + attachedUnit.unitText,
-              undefined,
-              unitInfo.food || basisFood,
-              { displayAmount: attachedUnit.quantity, displayUnit: attachedUnit.unitText }
-            ));
-            entryIndex += 1;
-            index += 1;
-            continue;
+          const attachedAmount = token.match(/^(.+?)([0-9]+(?:\.[0-9]+)?)(?:g|그램)$/i);
+          if (attachedAmount) {
+            const name = makeNameFromTokens([...tokens.slice(index, measureIndex), attachedAmount[1]]);
+            if (pushGramEntry(name, attachedAmount[2], segmentIndex, entryIndex)) entryIndex += 1;
+            index = measureIndex + 1;
+            handled = true;
+            break;
           }
 
-          entries.push(createUnsupportedOrOverrideItem(
-            attachedUnit.name,
-            attachedUnit.quantity,
-            attachedUnit.unitText,
-            customFoods,
-            attachedUnit.name + " " + formatAmount(attachedUnit.quantity) + attachedUnit.unitText,
-            basisFood,
-            unitOverrides
-          ));
-          entryIndex += 1;
-          index += 1;
-          continue;
-        }
-
-        const nextToken = tokens[index + 1] || "";
-        const nextNextToken = tokens[index + 2] || "";
-        const nextAmount = nextToken.match(/^([0-9]+(?:\.[0-9]+)?)(?:g|그램)?$/i);
-        const separatedGramUnit = nextAmount && /^(g|그램)$/i.test(nextNextToken);
-        const name = cleanFoodName(token);
-
-        const unitAmount = parseQuantityUnitTokens(nextToken, nextNextToken);
-        if (name && unitAmount) {
-          const basisFood = getMemoFoodBasis(basisMap, rowIndex, segmentIndex, entryIndex, name);
-          const unitInfo = resolveFoodUnitInfo(name, unitAmount.quantity, unitAmount.unitText, customFoods, basisFood);
-
-          if (unitInfo) {
-            entries.push(createItem(
-              name,
-              unitInfo.amount,
-              customFoods,
-              name + " " + formatAmount(unitAmount.quantity) + unitAmount.unitText,
-              undefined,
-              unitInfo.food || basisFood,
-              { displayAmount: unitAmount.quantity, displayUnit: unitAmount.unitText }
-            ));
-          } else {
-            entries.push(createUnsupportedOrOverrideItem(
-              name,
-              unitAmount.quantity,
-              unitAmount.unitText,
-              customFoods,
-              name + " " + formatAmount(unitAmount.quantity) + unitAmount.unitText,
-              basisFood,
-              unitOverrides
-            ));
+          const attachedUnit = parseAttachedFoodUnitToken(token);
+          if (attachedUnit?.name) {
+            const name = makeNameFromTokens([...tokens.slice(index, measureIndex), attachedUnit.name]);
+            if (pushUnitEntry(name, attachedUnit.quantity, attachedUnit.unitText, segmentIndex, entryIndex)) entryIndex += 1;
+            index = measureIndex + 1;
+            handled = true;
+            break;
           }
 
-          entryIndex += 1;
-          index += 1 + unitAmount.consumed;
-          continue;
+          const amountMatch = token.match(/^([0-9]+(?:\.[0-9]+)?)(?:g|그램)?$/i);
+          if (amountMatch && measureIndex > index) {
+            const name = makeNameFromTokens(tokens.slice(index, measureIndex));
+            if (pushGramEntry(name, amountMatch[1], segmentIndex, entryIndex)) entryIndex += 1;
+            index = measureIndex + (/^(g|그램)$/i.test(nextToken) ? 2 : 1);
+            handled = true;
+            break;
+          }
+
+          const unitAmount = parseQuantityUnitTokens(token, nextToken);
+          if (unitAmount && measureIndex > index) {
+            const name = makeNameFromTokens(tokens.slice(index, measureIndex));
+            if (pushUnitEntry(name, unitAmount.quantity, unitAmount.unitText, segmentIndex, entryIndex)) entryIndex += 1;
+            index = measureIndex + unitAmount.consumed;
+            handled = true;
+            break;
+          }
         }
 
-        if (name && nextAmount) {
-          const amount = toNumber(nextAmount[1]);
-          const basisFood = getMemoFoodBasis(basisMap, rowIndex, segmentIndex, entryIndex, name);
-          entries.push(createItem(name, amount, customFoods, name + " " + amount + "g", undefined, basisFood));
-          entryIndex += 1;
-          index += separatedGramUnit ? 3 : 2;
-          continue;
+        if (!handled) {
+          const name = makeNameFromTokens(tokens.slice(index));
+          if (name) {
+            const basisFood = getMemoFoodBasis(basisMap, rowIndex, segmentIndex, entryIndex, name);
+            entries.push(createItem(name, 0, customFoods, name, undefined, basisFood));
+          }
+          break;
         }
-
-        if (name) {
-          const basisFood = getMemoFoodBasis(basisMap, rowIndex, segmentIndex, entryIndex, name);
-          entries.push(createItem(name, 0, customFoods, name, undefined, basisFood));
-          entryIndex += 1;
-        }
-        index += 1;
       }
     });
 
@@ -2659,10 +2656,7 @@ export default function App() {
         const compact = parseQuantityUnitToken(lastToken);
         if (compact?.quantity > 0 && compact.unitText) {
           const name = cleanFoodName(tokens.slice(0, -1).join(""));
-          const basisFood = getMemoFoodBasis(memoFoodBasisMap, rowIndex, segmentIndex, 0, name);
-          if (name && resolveFoodUnitAmount(name, compact.quantity, compact.unitText, customFoods, basisFood) !== null) {
-            return compact;
-          }
+          if (name) return compact;
         }
       }
 
@@ -2670,10 +2664,7 @@ export default function App() {
         const separated = parseQuantityUnitTokens(tokens.at(-2), lastToken);
         if (separated?.quantity > 0 && separated.unitText) {
           const name = cleanFoodName(tokens.slice(0, -2).join(""));
-          const basisFood = getMemoFoodBasis(memoFoodBasisMap, rowIndex, segmentIndex, 0, name);
-          if (name && resolveFoodUnitAmount(name, separated.quantity, separated.unitText, customFoods, basisFood) !== null) {
-            return separated;
-          }
+          if (name) return separated;
         }
       }
 
@@ -2831,8 +2822,17 @@ export default function App() {
       const tokens = segmentBeforeCursor.split(/\s+/).filter(Boolean);
       const lastToken = tokens.at(-1) || "";
       const hasFoodName = tokens.length >= 2;
+      const compactUnit = tokens.length >= 2 ? parseQuantityUnitToken(lastToken) : null;
+      const separatedUnit = tokens.length >= 3 ? parseQuantityUnitTokens(tokens.at(-2), lastToken) : null;
+      const hasCompletedUnitInput = Boolean(
+        (compactUnit?.quantity > 0 && compactUnit.unitText && cleanFoodName(tokens.slice(0, -1).join(""))) ||
+        (separatedUnit?.quantity > 0 && separatedUnit.unitText && cleanFoodName(tokens.slice(0, -2).join("")))
+      );
 
-      if (start === end && hasFoodName && /^[0-9]+(?:\.[0-9]+)?$/.test(lastToken)) {
+      if (start === end && hasCompletedUnitInput) {
+        event.preventDefault();
+        setMemoValueWithCursor(before + ", " + after, start + 2);
+      } else if (start === end && hasFoodName && /^[0-9]+(?:\.[0-9]+)?$/.test(lastToken)) {
         event.preventDefault();
         setMemoValueWithCursor(before + "g, " + after, start + 3);
       } else if (start === end && hasFoodName && /^[0-9]+(?:\.[0-9]+)?g$/i.test(lastToken)) {
@@ -4793,7 +4793,7 @@ function FoodRow({ mealId, item, onLongPress, onOpenAmount, onOpenNutrition }) {
     >
       <div className="food-main">
         <strong>
-          {item.name}
+          {item.inputName || item.name}
           {showMatchedBasis && <span className="food-basis-inline">({matchedFoodName})</span>}
         </strong>
         {item.amount > 0 && (
