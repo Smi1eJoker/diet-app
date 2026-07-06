@@ -1669,6 +1669,15 @@ function parseDailyMemoInput(input, customFoods, basisMap = {}, unitOverrides = 
   const errors = [];
   const unitTargets = [];
 
+  const makePlaceholderItems = (foodText) => {
+    const cleanText = String(foodText || "").trim();
+    if (!cleanText) return [];
+    return splitFoodSegments(cleanText)
+      .map((segment) => cleanFoodName(segment))
+      .filter(Boolean)
+      .map((name) => createItem(name, 0, customFoods, name, undefined, null, { inputName: name }));
+  };
+
   lines.forEach(({ line, originalIndex }) => {
     const match = line.match(/^(\d{1,2}(?::\d{1,2})?)\s+(.+)$/);
 
@@ -1678,7 +1687,8 @@ function parseDailyMemoInput(input, customFoods, basisMap = {}, unitOverrides = 
         return;
       }
 
-      const items = parseFoodEntries(line, customFoods, { basisMap, rowIndex: originalIndex, unitOverrides });
+      let items = parseFoodEntries(line, customFoods, { basisMap, rowIndex: originalIndex, unitOverrides });
+      if (items.length === 0) items = makePlaceholderItems(line);
       const unsupportedUnitItem = getUnsupportedUnitItem(items);
       if (unsupportedUnitItem) {
         unitTargets.push(createUnitWeightTarget(unsupportedUnitItem, originalIndex + 1));
@@ -1703,7 +1713,8 @@ function parseDailyMemoInput(input, customFoods, basisMap = {}, unitOverrides = 
       return;
     }
 
-    const items = parseFoodEntries(match[2], customFoods, { basisMap, rowIndex: originalIndex, unitOverrides });
+    let items = parseFoodEntries(match[2], customFoods, { basisMap, rowIndex: originalIndex, unitOverrides });
+    if (items.length === 0) items = makePlaceholderItems(match[2]);
     const unsupportedUnitItem = getUnsupportedUnitItem(items);
     if (unsupportedUnitItem) {
       unitTargets.push(createUnitWeightTarget(unsupportedUnitItem, originalIndex + 1));
