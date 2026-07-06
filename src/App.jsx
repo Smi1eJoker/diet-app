@@ -1547,28 +1547,37 @@ function parseFoodEntries(text, customFoods, options = {}) {
   const basisMap = options.basisMap || {};
   const unitOverrides = options.unitOverrides || {};
 
-  const makeNameFromTokens = (tokens) => tokens.join(" ").trim();
+  const quantityPattern = "[0-9]+(?:\\.[0-9]+)?|한|하나|두|둘|세|셋|네|넷|다섯|여섯|일곱|여덟|아홉|열|반";
+  const unitPattern = "개|알|공기|밥공기|그릇|줌|컵|잔|팩|스쿱|봉|조각";
 
-  const pushGramEntry = (name, amount, segmentIndex, entryIndex) => {
-    const inputName = String(name || "").trim();
-    const cleanName = cleanFoodName(inputName);
+  const pushGramEntry = (inputName, amount, segmentIndex, entryIndex) => {
+    const displayName = String(inputName || "").trim();
+    const cleanName = cleanFoodName(displayName);
     const cleanAmount = toNumber(amount);
-    if (!cleanName || cleanAmount <= 0) return false;
+    if (!cleanName) return false;
 
     const basisFood = getMemoFoodBasis(basisMap, rowIndex, segmentIndex, entryIndex, cleanName);
-    entries.push(createItem(cleanName, cleanAmount, customFoods, inputName + " " + cleanAmount + "g", undefined, basisFood, { inputName }));
+    entries.push(createItem(
+      cleanName,
+      cleanAmount,
+      customFoods,
+      displayName + (cleanAmount > 0 ? " " + formatAmount(cleanAmount) + "g" : ""),
+      undefined,
+      basisFood,
+      { inputName: displayName }
+    ));
     return true;
   };
 
-  const pushUnitEntry = (name, quantity, unitText, segmentIndex, entryIndex) => {
-    const inputName = String(name || "").trim();
-    const cleanName = cleanFoodName(inputName);
+  const pushUnitEntry = (inputName, quantity, unitText, segmentIndex, entryIndex) => {
+    const displayName = String(inputName || "").trim();
+    const cleanName = cleanFoodName(displayName);
     const cleanQuantity = toNumber(quantity);
     if (!cleanName || cleanQuantity <= 0 || !unitText) return false;
 
     const basisFood = getMemoFoodBasis(basisMap, rowIndex, segmentIndex, entryIndex, cleanName);
     const unitInfo = resolveFoodUnitInfo(cleanName, cleanQuantity, unitText, customFoods, basisFood);
-    const rawLine = inputName + " " + formatAmount(cleanQuantity) + unitText;
+    const rawLine = displayName + " " + formatAmount(cleanQuantity) + unitText;
 
     if (unitInfo) {
       entries.push(createItem(
@@ -1578,13 +1587,13 @@ function parseFoodEntries(text, customFoods, options = {}) {
         rawLine,
         undefined,
         unitInfo.food || basisFood,
-        { displayAmount: cleanQuantity, displayUnit: unitText, inputName }
+        { displayAmount: cleanQuantity, displayUnit: unitText, inputName: displayName }
       ));
       return true;
     }
 
     entries.push(createUnsupportedOrOverrideItem(
-      inputName,
+      displayName,
       cleanQuantity,
       unitText,
       customFoods,
@@ -1595,66 +1604,49 @@ function parseFoodEntries(text, customFoods, options = {}) {
     return true;
   };
 
-  splitFoodSegments(text)
-    .forEach((segment, segmentIndex) => {
-      const tokens = segment.split(/\s+/).filter(Boolean);
-      let index = 0;
-      let entryIndex = 0;
+  splitFoodSegments(text).forEach((segment, segmentIndex) => {
+    const source = String(segment || "").trim();
+    if (!source) return;
+    let entryIndex = 0;
 
-      while (index < tokens.length) {
-        let handled = false;
+    // 1) 붙여 쓴 g: 닭가슴살270g, 소고기등심200g
+    let match = source.match(/^(.+?)([0-9]+(?:\.[0-9]+)?)(?:g|그램)$/i);
+    if (match) {
+      if (pushGramEntry(match[1], match[2], segmentIndex, entryIndex)) entryIndex += 1;
+      return;
+    }
 
-        for (let measureIndex = index; measureIndex < tokens.length; measureIndex += 1) {
-          const token = tokens[measureIndex];
-          const nextToken = tokens[measureIndex + 1] || "";
+    // 2) 띄어 쓴 g: 소고기 등심 200g / 소고기 등심 200 g / 밥 200
+    match = source.match(/^(.+?)\s+([0-9]+(?:\.[0-9]+)?)(?:\s*(?:g|그램))?$/i);
+    if (match) {
+      if (pushGramEntry(match[1], match[2], segmentIndex, entryIndex)) entryIndex += 1;
+      return;
+    }
 
-          const attachedAmount = token.match(/^(.+?)([0-9]+(?:\.[0-9]+)?)(?:g|그램)$/i);
-          if (attachedAmount) {
-            const name = makeNameFromTokens([...tokens.slice(index, measureIndex), attachedAmount[1]]);
-            if (pushGramEntry(name, attachedAmount[2], segmentIndex, entryIndex)) entryIndex += 1;
-            index = measureIndex + 1;
-            handled = true;
-            break;
-          }
+    // 3) 붙여 쓴 수량 단위: 바나나1개 / 계란한개 / 계란0.5개
+    match = source.match(new RegExp("^(.+?)(" + quantityPattern + ")(" + unitPattern + ")$"));
+    if (match) {
+      const quantity = parseKoreanQuantity(match[2]);
+      if (pushUnitEntry(match[1], quantity, match[3], segmentIndex, entryIndex)) entryIndex += 1;
+      return;
+    }
 
-          const attachedUnit = parseAttachedFoodUnitToken(token);
-          if (attachedUnit?.name) {
-            const name = makeNameFromTokens([...tokens.slice(index, measureIndex), attachedUnit.name]);
-            if (pushUnitEntry(name, attachedUnit.quantity, attachedUnit.unitText, segmentIndex, entryIndex)) entryIndex += 1;
-            index = measureIndex + 1;
-            handled = true;
-            break;
-          }
+    // 4) 띄어 쓴 수량 단위: 바나나 1개 / 계란 한개 / 계란 한 개 / 소고기 등심 1팩
+    match = source.match(new RegExp("^(.+?)\\s+(" + quantityPattern + ")\\s*(" + unitPattern + ")$"));
+    if (match) {
+      const quantity = parseKoreanQuantity(match[2]);
+      if (pushUnitEntry(match[1], quantity, match[3], segmentIndex, entryIndex)) entryIndex += 1;
+      return;
+    }
 
-          const amountMatch = token.match(/^([0-9]+(?:\.[0-9]+)?)(?:g|그램)?$/i);
-          if (amountMatch && measureIndex > index) {
-            const name = makeNameFromTokens(tokens.slice(index, measureIndex));
-            if (pushGramEntry(name, amountMatch[1], segmentIndex, entryIndex)) entryIndex += 1;
-            index = measureIndex + (/^(g|그램)$/i.test(nextToken) ? 2 : 1);
-            handled = true;
-            break;
-          }
-
-          const unitAmount = parseQuantityUnitTokens(token, nextToken);
-          if (unitAmount && measureIndex > index) {
-            const name = makeNameFromTokens(tokens.slice(index, measureIndex));
-            if (pushUnitEntry(name, unitAmount.quantity, unitAmount.unitText, segmentIndex, entryIndex)) entryIndex += 1;
-            index = measureIndex + unitAmount.consumed;
-            handled = true;
-            break;
-          }
-        }
-
-        if (!handled) {
-          const name = makeNameFromTokens(tokens.slice(index));
-          if (name) {
-            const basisFood = getMemoFoodBasis(basisMap, rowIndex, segmentIndex, entryIndex, name);
-            entries.push(createItem(name, 0, customFoods, name, undefined, basisFood));
-          }
-          break;
-        }
-      }
-    });
+    // 5) 음식명만 있는 경우: 제육
+    const displayName = source.trim();
+    const cleanName = cleanFoodName(displayName);
+    if (cleanName) {
+      const basisFood = getMemoFoodBasis(basisMap, rowIndex, segmentIndex, entryIndex, cleanName);
+      entries.push(createItem(cleanName, 0, customFoods, displayName, undefined, basisFood, { inputName: displayName }));
+    }
+  });
 
   return entries;
 }
