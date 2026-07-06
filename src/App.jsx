@@ -242,16 +242,36 @@ function toFoodEntry(row, fallbackId) {
   };
 }
 
-function buildFoodMap(appFoods = [], userAliases = [], userFoods = [], foodSearchTerms = []) {
+function buildFoodMap(appFoods = [], userAliases = [], userFoods = [], foodSearchTerms = [], foodUnits = []) {
   const nextMap = {};
   const appFoodsById = {};
   const userFoodsById = {};
+  const unitsByAppFoodId = {};
+
+  foodUnits.forEach((row) => {
+    if (!row.app_food_id) return;
+    const key = String(row.app_food_id);
+    const unit = {
+      unitId: row.unit_id || null,
+      unitName: cleanFoodName(row.unit_name || ""),
+      grams: toNumber(row.grams),
+      isDefault: Boolean(row.is_default),
+      aliases: Array.isArray(row.aliases) ? row.aliases.map(cleanFoodName).filter(Boolean) : [],
+    };
+
+    if (!unit.unitName || unit.grams <= 0) return;
+    unitsByAppFoodId[key] = [...(unitsByAppFoodId[key] || []), unit];
+  });
 
   appFoods.forEach((row) => {
     const food = toFoodEntry(row);
     if (!food.name) return;
-    nextMap[normalize(food.name)] = food;
-    if (food.appFoodId) appFoodsById[String(food.appFoodId)] = food;
+    const foodWithUnits = {
+      ...food,
+      units: food.appFoodId ? (unitsByAppFoodId[String(food.appFoodId)] || []) : [],
+    };
+    nextMap[normalize(foodWithUnits.name)] = foodWithUnits;
+    if (foodWithUnits.appFoodId) appFoodsById[String(foodWithUnits.appFoodId)] = foodWithUnits;
   });
 
   userFoods.forEach((row) => {
@@ -310,6 +330,7 @@ async function fetchFoodDatabase(session) {
 
   const appFoodsPath = "/app_foods?select=app_food_id,display_name,raw_food_id,category,default_unit,default_amount,search_priority,raw_foods(raw_food_id,raw_name,kcal_per_100g,carb_g_per_100g,protein_g_per_100g,fat_g_per_100g)&order=search_priority.desc,display_name.asc";
   const foodSearchTermsPath = "/food_search_terms?select=term_id,term_text,term_norm,app_food_id,weight&order=weight.desc,term_text.asc";
+  const foodUnitsPath = "/food_units?select=unit_id,app_food_id,unit_name,grams,is_default,aliases&order=app_food_id.asc,unit_name.asc";
 
   // 기본 음식 DB는 사용자 로그인 토큰이 아니라 anon/publishable key로 불러온다.
   // 저장된 로그인 토큰이 만료되어도 app_foods/raw_foods는 계속 매칭되어야 한다.
@@ -318,6 +339,7 @@ async function fetchFoodDatabase(session) {
   // food_search_terms는 후보 추천 품질을 올리는 선택 테이블이다.
   // 아직 테이블을 만들지 않았거나 권한이 없어도 앱 본체는 그대로 동작해야 한다.
   const foodSearchTermsPromise = requestSupabaseRest(foodSearchTermsPath, {}, null).catch(() => []);
+  const foodUnitsPromise = requestSupabaseRest(foodUnitsPath, {}, null).catch(() => []);
 
   const safeUserRequest = (promise) =>
     promise.catch((error) => {
@@ -332,14 +354,15 @@ async function fetchFoodDatabase(session) {
     ? safeUserRequest(requestSupabaseRest("/user_foods?select=*&user_id=eq." + encodeURIComponent(userId), {}, accessToken))
     : Promise.resolve([]);
 
-  const [appFoods, userAliases, userFoods, foodSearchTerms] = await Promise.all([
+  const [appFoods, userAliases, userFoods, foodSearchTerms, foodUnits] = await Promise.all([
     appFoodsPromise,
     userAliasesPromise,
     userFoodsPromise,
     foodSearchTermsPromise,
+    foodUnitsPromise,
   ]);
 
-  return buildFoodMap(appFoods || [], userAliases || [], userFoods || [], foodSearchTerms || []);
+  return buildFoodMap(appFoods || [], userAliases || [], userFoods || [], foodSearchTerms || [], foodUnits || []);
 }
 
 async function upsertUserFood(session, food) {
@@ -1139,6 +1162,142 @@ function getMemoFoodBasis(basisMap, rowIndex, segmentIndex, entryIndex, name) {
   return basis.food;
 }
 
+
+function getFoodUnitAliases(unit) {
+  return [unit?.unitName, ...(unit?.aliases || [])]
+    .map((value) => normalize(value || ""))
+    .filter(Boolean);
+}
+
+function findFoodUnit(food, unitText) {
+  const normalizedUnit = normalize(unitText);
+  if (!normalizedUnit) return null;
+
+  if (["g", "그램"].includes(normalizedUnit)) {
+    return { unitName: "g", grams: 1, aliases: ["g", "그램"] };
+  }
+
+  return (food?.units || []).find((unit) => getFoodUnitAliases(unit).includes(normalizedUnit)) || null;
+}
+
+function parseKoreanQuantity(value) {
+  const text = normalize(value);
+  if (!text) return null;
+
+  const numeric = Number(text);
+  if (Number.isFinite(numeric) && numeric > 0) return numeric;
+
+  const quantityMap = {
+    한: 1,
+    하나: 1,
+    한개: 1,
+    한알: 1,
+    한공기: 1,
+    한그릇: 1,
+    한줌: 1,
+    한컵: 1,
+    한잔: 1,
+    두: 2,
+    둘: 2,
+    두개: 2,
+    두알: 2,
+    두공기: 2,
+    세: 3,
+    셋: 3,
+    세개: 3,
+    세알: 3,
+    세공기: 3,
+    네: 4,
+    넷: 4,
+    네개: 4,
+    네알: 4,
+    다섯: 5,
+    여섯: 6,
+    일곱: 7,
+    여덟: 8,
+    아홉: 9,
+    열: 10,
+    반: 0.5,
+  };
+
+  return quantityMap[text] || null;
+}
+
+function isLikelyUnitToken(value) {
+  return ["개", "알", "공기", "밥공기", "그릇", "줌", "컵", "잔"].includes(normalize(value));
+}
+
+function parseQuantityUnitToken(token) {
+  const text = String(token || "").trim();
+  if (!text) return null;
+
+  const gramMatch = text.match(/^([0-9]+(?:\.[0-9]+)?)(g|그램)$/i);
+  if (gramMatch) {
+    return { quantity: toNumber(gramMatch[1]), unitText: gramMatch[2], consumed: 1 };
+  }
+
+  if (/^[0-9]+(?:\.[0-9]+)?$/.test(text)) return null;
+
+  const numberMatch = text.match(/^([0-9]+(?:\.[0-9]+)?)(.+)$/);
+  if (numberMatch) {
+    return { quantity: toNumber(numberMatch[1]), unitText: numberMatch[2], consumed: 1 };
+  }
+
+  const koreanQuantityPattern = "한|하나|두|둘|세|셋|네|넷|다섯|여섯|일곱|여덟|아홉|열|반";
+  if (new RegExp("^(" + koreanQuantityPattern + ")$").test(text)) return null;
+
+  const koreanMatch = text.match(new RegExp("^(" + koreanQuantityPattern + ")(.+)$"));
+  if (koreanMatch) {
+    return { quantity: parseKoreanQuantity(koreanMatch[1]), unitText: koreanMatch[2], consumed: 1 };
+  }
+
+  return isLikelyUnitToken(text) ? { quantity: 1, unitText: text, consumed: 1 } : null;
+}
+
+function parseQuantityUnitTokens(quantityToken, unitToken) {
+  const quantity = parseKoreanQuantity(quantityToken);
+  if (quantity && unitToken) {
+    return { quantity, unitText: unitToken, consumed: 2 };
+  }
+
+  const compact = parseQuantityUnitToken(quantityToken);
+  if (compact && compact.quantity > 0 && compact.unitText) return compact;
+
+  return null;
+}
+
+function parseAttachedFoodUnitToken(token) {
+  const text = String(token || "").trim();
+  if (!text) return null;
+
+  const quantityPattern = "[0-9]+(?:\\.[0-9]+)?|한|하나|두|둘|세|셋|네|넷|다섯|여섯|일곱|여덟|아홉|열|반";
+  const match = text.match(new RegExp("^(.+?)(" + quantityPattern + ")([^0-9\\s]+)$"));
+  if (!match) return null;
+
+  const quantity = parseKoreanQuantity(match[2]);
+  if (!quantity) return null;
+
+  return {
+    name: cleanFoodName(match[1]),
+    quantity,
+    unitText: match[3],
+  };
+}
+
+function resolveFoodUnitAmount(name, quantity, unitText, customFoods, basisFood) {
+  const cleanQuantity = toNumber(quantity);
+  if (cleanQuantity <= 0) return null;
+
+  const normalizedUnit = normalize(unitText);
+  if (["g", "그램"].includes(normalizedUnit)) return cleanQuantity;
+
+  const food = basisFood || findFoodByName(name, customFoods);
+  const unit = findFoodUnit(food, unitText);
+  if (!unit) return null;
+
+  return cleanQuantity * toNumber(unit.grams);
+}
+
 function createItem(name, amount, customFoods, rawLine, id, basisFood) {
   const cleanName = cleanFoodName(name);
   const cleanAmount = toNumber(amount);
@@ -1156,10 +1315,8 @@ function parseMemoLine(line, customFoods) {
   const rawLine = line.trim();
   if (!rawLine) return null;
 
-  const match = rawLine.match(/^(.+?)(?:\s+([0-9]+(?:\.[0-9]+)?)\s*(?:g|그램)?)?$/i);
-  if (!match) return createItem(rawLine, 0, customFoods, rawLine);
-
-  return createItem(match[1], match[2] || 0, customFoods, rawLine);
+  const entries = parseFoodEntries(rawLine, customFoods);
+  return entries[0] || createItem(rawLine, 0, customFoods, rawLine);
 }
 
 function itemToMemoLine(item) {
@@ -1256,16 +1413,53 @@ function parseFoodEntries(text, customFoods, options = {}) {
           continue;
         }
 
+        const attachedUnit = parseAttachedFoodUnitToken(token);
+        if (attachedUnit?.name) {
+          const basisFood = getMemoFoodBasis(basisMap, rowIndex, segmentIndex, entryIndex, attachedUnit.name);
+          const amount = resolveFoodUnitAmount(
+            attachedUnit.name,
+            attachedUnit.quantity,
+            attachedUnit.unitText,
+            customFoods,
+            basisFood
+          );
+
+          if (amount !== null) {
+            entries.push(createItem(attachedUnit.name, amount, customFoods, attachedUnit.name + " " + formatAmount(amount) + "g", undefined, basisFood));
+            entryIndex += 1;
+            index += 1;
+            continue;
+          }
+        }
+
         const nextToken = tokens[index + 1] || "";
+        const nextNextToken = tokens[index + 2] || "";
         const nextAmount = nextToken.match(/^([0-9]+(?:\.[0-9]+)?)(?:g|그램)?$/i);
+        const separatedGramUnit = nextAmount && /^(g|그램)$/i.test(nextNextToken);
         const name = cleanFoodName(token);
+
+        const unitAmount = parseQuantityUnitTokens(nextToken, nextNextToken);
+        if (name && unitAmount) {
+          const basisFood = getMemoFoodBasis(basisMap, rowIndex, segmentIndex, entryIndex, name);
+          const amount = resolveFoodUnitAmount(name, unitAmount.quantity, unitAmount.unitText, customFoods, basisFood);
+
+          if (amount !== null) {
+            entries.push(createItem(name, amount, customFoods, name + " " + formatAmount(amount) + "g", undefined, basisFood));
+          } else {
+            entries.push(createItem(name, 0, customFoods, name, undefined, basisFood));
+          }
+
+          entryIndex += 1;
+          index += 1 + unitAmount.consumed;
+          continue;
+        }
 
         if (name && nextAmount) {
           const amount = toNumber(nextAmount[1]);
           const basisFood = getMemoFoodBasis(basisMap, rowIndex, segmentIndex, entryIndex, name);
           entries.push(createItem(name, amount, customFoods, name + " " + amount + "g", undefined, basisFood));
           entryIndex += 1;
-          index += 2;
+          index += separatedGramUnit ? 3 : 2;
           continue;
         }
 
@@ -1603,7 +1797,7 @@ export default function App() {
     fetchFoodDatabase(authSession)
       .then((foodMap) => {
         if (!isMounted) return;
-        setCustomFoods((current) => ({ ...foodMap, ...current }));
+        setCustomFoods((current) => ({ ...current, ...foodMap }));
       })
       .catch((error) => {
         if (!isMounted) return;
