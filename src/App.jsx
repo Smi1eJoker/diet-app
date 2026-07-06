@@ -3027,7 +3027,11 @@ export default function App() {
                       onClick={() => openNutritionMatchChoice(food)}
                     >
                       <strong>{getFoodDisplayName(food)}</strong>
-                      <span>100g {Math.round(food.kcal)}kcal · Carb {formatMacro(food.carb)}g · Pro {formatMacro(food.protein)}g · Fat {formatMacro(food.fat)}g</span>
+                      <em>100g</em>
+                      <span>
+                        <b>{Math.round(food.kcal)}kcal</b>
+                        <small>C {formatMacro(food.carb)}g P {formatMacro(food.protein)}g F {formatMacro(food.fat)}g</small>
+                      </span>
                     </button>
                   ))}
                 </div>
@@ -4146,7 +4150,7 @@ function MealCard({ meal, onToggle, onEditMeal, onLongPress, onFoodLongPress, on
           <div className="meal-summary-inline">
             <span className="meal-summary-kcal">{Math.round(mealTotals.kcal)} kcal</span>
             <span className="meal-summary-macros">
-              Carb {formatMacro(mealTotals.carb)}g · Pro {formatMacro(mealTotals.protein)}g · Fat {formatMacro(mealTotals.fat)}g
+              C {formatMacro(mealTotals.carb)}g P {formatMacro(mealTotals.protein)}g F {formatMacro(mealTotals.fat)}g
             </span>
           </div>
         </div>

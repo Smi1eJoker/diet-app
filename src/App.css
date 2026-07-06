@@ -4009,3 +4009,121 @@ textarea,
     font-size: 11px;
   }
 }
+
+
+/* v17: compact meal macro text and 3-zone nutrition candidate rows */
+
+/* 시간은 영양성분 두 줄 사이 중앙에 오도록 정렬 */
+.meal-header-main {
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center !important;
+}
+
+.meal-time {
+  align-self: center;
+  line-height: 1;
+}
+
+.meal-summary-inline {
+  align-self: center;
+  gap: 4px;
+  padding-top: 0;
+}
+
+.meal-summary-kcal {
+  color: #66e36f !important;
+  font-size: 13px;
+  line-height: 1;
+}
+
+.meal-summary-macros {
+  color: #66e36f !important;
+  font-size: 12px;
+  line-height: 1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* 음식 연결 후보: 음식명 / 기준중량 / 영양성분 3구역 */
+.alias-candidate-list button {
+  display: grid;
+  grid-template-columns: minmax(82px, 0.95fr) 42px minmax(0, 1.35fr);
+  align-items: center;
+  column-gap: 8px;
+  min-height: 58px;
+  padding: 10px 11px;
+}
+
+.alias-candidate-list button strong {
+  min-width: 0;
+  font-size: 14px;
+  line-height: 1.25;
+  overflow-wrap: anywhere;
+}
+
+.alias-candidate-list button em {
+  display: block;
+  color: #b8b8b8;
+  font-style: normal;
+  font-size: 12px;
+  font-weight: 900;
+  line-height: 1.1;
+  text-align: center;
+  white-space: nowrap;
+}
+
+.alias-candidate-list button span {
+  min-width: 0;
+  display: grid;
+  gap: 3px;
+  color: #b8b8b8;
+  font-size: 12px;
+  font-weight: 900;
+  line-height: 1.15;
+  overflow-wrap: anywhere;
+}
+
+.alias-candidate-list button span b,
+.alias-candidate-list button span small {
+  display: block;
+  color: inherit;
+  font: inherit;
+  line-height: inherit;
+}
+
+.alias-candidate-list button span small {
+  font-size: 11px;
+}
+
+@media (max-width: 380px) {
+  .meal-summary-kcal {
+    font-size: 12px;
+  }
+
+  .meal-summary-macros {
+    font-size: 11px;
+  }
+
+  .alias-candidate-list button {
+    grid-template-columns: minmax(76px, 0.9fr) 38px minmax(0, 1.3fr);
+    column-gap: 7px;
+    padding: 9px 10px;
+  }
+
+  .alias-candidate-list button strong {
+    font-size: 13px;
+  }
+
+  .alias-candidate-list button em {
+    font-size: 11px;
+  }
+
+  .alias-candidate-list button span {
+    font-size: 11px;
+  }
+
+  .alias-candidate-list button span small {
+    font-size: 10px;
+  }
+}
