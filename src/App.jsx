@@ -1935,7 +1935,15 @@ export default function App() {
   const [formError, setFormError] = useState("");
   const [nutritionTarget, setNutritionTarget] = useState(null);
   const [matchChoiceTarget, setMatchChoiceTarget] = useState(null);
-  const [nutritionForm, setNutritionForm] = useState({ baseAmount: "100", kcal: "", carb: "", protein: "", fat: "" });
+  const [nutritionForm, setNutritionForm] = useState({
+    foodName: "",
+    baseAmount: "100",
+    kcal: "",
+    carb: "",
+    protein: "",
+    fat: "",
+    saveAlias: true,
+  });
   const [amountTarget, setAmountTarget] = useState(null);
   const [amountInput, setAmountInput] = useState("");
   const [unitAmountTarget, setUnitAmountTarget] = useState(null);
@@ -3070,26 +3078,40 @@ export default function App() {
 
   const openNutritionModal = (mealId, item) => {
     const currentFood = getItemBasisFood(item);
+    const inputFoodName = formatMemoItemName(item.inputName || item.name || "");
+
     setNutritionTarget({
       mealId,
       itemId: item.id,
       name: item.name,
+      inputName: inputFoodName,
       amount: item.amount,
       currentFood,
     });
+
     setNutritionForm({
+      foodName: inputFoodName || item.name,
       baseAmount: "100",
       kcal: currentFood ? String(Math.round(toNumber(currentFood.kcal))) : "",
       carb: currentFood ? formatMacro(toNumber(currentFood.carb)) : "",
       protein: currentFood ? formatMacro(toNumber(currentFood.protein)) : "",
       fat: currentFood ? formatMacro(toNumber(currentFood.fat)) : "",
+      saveAlias: true,
     });
   };
 
   const closeNutritionModal = () => {
     setNutritionTarget(null);
     setMatchChoiceTarget((current) => current?.source === "nutrition" ? null : current);
-    setNutritionForm({ baseAmount: "100", kcal: "", carb: "", protein: "", fat: "" });
+    setNutritionForm({
+      foodName: "",
+      baseAmount: "100",
+      kcal: "",
+      carb: "",
+      protein: "",
+      fat: "",
+      saveAlias: true,
+    });
   };
 
   const openFoodBasisModal = (mealId, foodId) => {
@@ -3104,18 +3126,25 @@ export default function App() {
     event.preventDefault();
     if (!nutritionTarget) return;
 
+    const aliasName = cleanFoodName(nutritionTarget.name);
+    const foodName = cleanFoodName(nutritionForm.foodName || nutritionTarget.inputName || nutritionTarget.name);
     const baseAmount = toNumber(nutritionForm.baseAmount) || 100;
-    const per100Rate = baseAmount > 0 ? 100 / baseAmount : 1;
+
+    if (!foodName || baseAmount <= 0) return;
+
+    const per100Rate = 100 / baseAmount;
+
     const food = {
-      id: "custom-" + normalize(nutritionTarget.name),
-      name: cleanFoodName(nutritionTarget.name),
+      id: "custom-" + normalize(foodName),
+      name: foodName,
       kcal: toNumber(nutritionForm.kcal) * per100Rate,
       carb: toNumber(nutritionForm.carb) * per100Rate,
       protein: toNumber(nutritionForm.protein) * per100Rate,
       fat: toNumber(nutritionForm.fat) * per100Rate,
+      source: "user_food",
     };
 
-    if (baseAmount <= 0 || food.kcal <= 0) return;
+    if (food.kcal <= 0) return;
 
     let storedFood = food;
 
@@ -3123,19 +3152,68 @@ export default function App() {
       try {
         const savedRow = await upsertUserFood(authSession, {
           ...food,
-          base_amount_g: 100,
+          base_amount: 100,
+          base_unit: "g",
         });
+
         storedFood = toFoodEntry(savedRow, food.id);
       } catch (error) {
         console.warn("개인 음식 DB 저장 실패, 로컬 반영 유지:", error);
       }
     }
 
-    const nextCustomFoods = { ...customFoods, [normalize(storedFood.name)]: storedFood };
+    let nextCustomFoods = {
+      ...customFoods,
+      [normalize(storedFood.name)]: storedFood,
+    };
+
+    if (nutritionForm.saveAlias && aliasName) {
+      const aliasFood = {
+        ...storedFood,
+        id: "local-alias-" + normalize(aliasName),
+        name: aliasName,
+        canonicalName: getFoodDisplayName(storedFood),
+        source: "user_alias",
+      };
+
+      nextCustomFoods = {
+        ...nextCustomFoods,
+        [normalize(aliasName)]: aliasFood,
+      };
+
+      if (HAS_SUPABASE_CONFIG && authSession) {
+        try {
+          await upsertUserAlias(authSession, aliasName, storedFood);
+        } catch (error) {
+          console.warn("개인 음식 별칭 저장 실패, 로컬 반영 유지:", error);
+        }
+      }
+    }
+
     setCustomFoods(nextCustomFoods);
-    updateMatchingItems((item) =>
-      normalize(item.name) === normalize(storedFood.name) ? resolveItem(item, nextCustomFoods) : item
+
+    setMeals((current) =>
+      current.map((meal) => ({
+        ...meal,
+        items: meal.items.map((item) => {
+          const isCurrentTarget =
+            meal.id === nutritionTarget.mealId &&
+            item.id === nutritionTarget.itemId;
+
+          const isSameUnresolvedName =
+            !item.per100 &&
+            aliasName &&
+            normalize(item.name) === normalize(aliasName);
+
+          if (isCurrentTarget || isSameUnresolvedName) {
+            return applyFoodBasisToItem(item, storedFood);
+          }
+
+          return item;
+        }),
+      }))
     );
+
     closeNutritionModal();
   };
 
@@ -3661,6 +3739,36 @@ export default function App() {
               </div>
             )}
             <div className="nutrition-manual-grid">
+              <label>
+                <span>음식명</span>
+                <input
+                  value={nutritionForm.foodName}
+                  onChange={(event) =>
+                    setNutritionForm((current) => ({
+                      ...current,
+                      foodName: event.target.value,
+                    }))
+                  }
+                  placeholder="예: 제육"
+                  lang="ko"
+                  autoCapitalize="off"
+                />
+              </label>
+
+              <label className="nutrition-alias-check">
+                <input
+                  type="checkbox"
+                  checked={nutritionForm.saveAlias}
+                  onChange={(event) =>
+                    setNutritionForm((current) => ({
+                      ...current,
+                      saveAlias: event.target.checked,
+                    }))
+                  }
+                />
+                <span>현재 입력명도 다음부터 자동 계산</span>
+              </label>
+
               <div className="nutrition-manual-row nutrition-manual-row-two">
                 <label>
                   <span>기준 중량(g)</span>
