@@ -1298,7 +1298,7 @@ function resolveFoodUnitAmount(name, quantity, unitText, customFoods, basisFood)
   return cleanQuantity * toNumber(unit.grams);
 }
 
-function createItem(name, amount, customFoods, rawLine, id, basisFood) {
+function createItem(name, amount, customFoods, rawLine, id, basisFood, displayInfo = {}) {
   const cleanName = cleanFoodName(name);
   const cleanAmount = toNumber(amount);
   const baseItem = {
@@ -1306,6 +1306,7 @@ function createItem(name, amount, customFoods, rawLine, id, basisFood) {
     rawLine: rawLine || cleanName + (cleanAmount > 0 ? " " + cleanAmount + "g" : ""),
     name: cleanName,
     amount: cleanAmount,
+    ...displayInfo,
   };
 
   return basisFood ? applyFoodBasisToItem(baseItem, basisFood) : resolveItem(baseItem, customFoods);
@@ -1320,6 +1321,10 @@ function parseMemoLine(line, customFoods) {
 }
 
 function itemToMemoLine(item) {
+  if (item.displayUnit && toNumber(item.displayAmount) > 0) {
+    return item.name + " " + formatAmount(toNumber(item.displayAmount)) + item.displayUnit;
+  }
+
   return item.name + (item.amount > 0 ? " " + formatAmount(item.amount) + "g" : "");
 }
 
@@ -1352,14 +1357,35 @@ function splitDailyMemoRows(value) {
   });
 }
 
+function appendMemoFoods(existingFoods, addedFoods) {
+  const existing = String(existingFoods || "").trim();
+  const added = String(addedFoods || "").trim();
+  if (!added) return existing;
+  return existing ? existing + ", " + added : added;
+}
+
 function buildDailyMemoFromRows(rows) {
-  return rows
-    .map((row) => {
-      const time = String(row.time || "").trim();
-      const foods = String(row.foods || "").trimStart();
-      if (!time && !foods) return "";
-      return time + (foods ? "\t" + foods : "");
-    })
+  const mergedRows = [];
+
+  (rows || []).forEach((row) => {
+    const time = String(row.time || "").trim();
+    const foods = String(row.foods || "").trimStart();
+    if (!time && !foods) return;
+
+    if (!time && foods && mergedRows.length > 0) {
+      const lastIndex = mergedRows.length - 1;
+      mergedRows[lastIndex] = {
+        ...mergedRows[lastIndex],
+        foods: appendMemoFoods(mergedRows[lastIndex].foods, foods),
+      };
+      return;
+    }
+
+    mergedRows.push({ time, foods });
+  });
+
+  return mergedRows
+    .map((row) => row.time + (row.foods ? "\t" + row.foods : ""))
     .join("\n");
 }
 
@@ -1425,7 +1451,15 @@ function parseFoodEntries(text, customFoods, options = {}) {
           );
 
           if (amount !== null) {
-            entries.push(createItem(attachedUnit.name, amount, customFoods, attachedUnit.name + " " + formatAmount(amount) + "g", undefined, basisFood));
+            entries.push(createItem(
+              attachedUnit.name,
+              amount,
+              customFoods,
+              attachedUnit.name + " " + formatAmount(attachedUnit.quantity) + attachedUnit.unitText,
+              undefined,
+              basisFood,
+              { displayAmount: attachedUnit.quantity, displayUnit: attachedUnit.unitText }
+            ));
             entryIndex += 1;
             index += 1;
             continue;
@@ -1444,7 +1478,15 @@ function parseFoodEntries(text, customFoods, options = {}) {
           const amount = resolveFoodUnitAmount(name, unitAmount.quantity, unitAmount.unitText, customFoods, basisFood);
 
           if (amount !== null) {
-            entries.push(createItem(name, amount, customFoods, name + " " + formatAmount(amount) + "g", undefined, basisFood));
+            entries.push(createItem(
+              name,
+              amount,
+              customFoods,
+              name + " " + formatAmount(unitAmount.quantity) + unitAmount.unitText,
+              undefined,
+              basisFood,
+              { displayAmount: unitAmount.quantity, displayUnit: unitAmount.unitText }
+            ));
           } else {
             entries.push(createItem(name, 0, customFoods, name, undefined, basisFood));
           }
@@ -1486,8 +1528,24 @@ function parseDailyMemoInput(input, customFoods, basisMap = {}) {
 
   lines.forEach(({ line, originalIndex }) => {
     const match = line.match(/^(\d{1,2}(?::\d{1,2})?)\s+(.+)$/);
+
     if (!match) {
-      errors.push(`${originalIndex + 1}번째 줄: 시각을 먼저 입력해 주세요.`);
+      if (meals.length === 0) {
+        errors.push(`${originalIndex + 1}번째 줄: 시각을 먼저 입력해 주세요.`);
+        return;
+      }
+
+      const items = parseFoodEntries(line, customFoods, { basisMap, rowIndex: originalIndex });
+      if (items.length === 0) {
+        errors.push(`${originalIndex + 1}번째 줄: 음식명을 입력해 주세요.`);
+        return;
+      }
+
+      const lastIndex = meals.length - 1;
+      meals[lastIndex] = {
+        ...meals[lastIndex],
+        items: [...meals[lastIndex].items, ...items],
+      };
       return;
     }
 
@@ -2356,10 +2414,44 @@ export default function App() {
   };
 
   const handleMemoRowFoodChange = (rowIndex, event) => {
+    const nextValue = event.target.value;
+    const row = visibleMemoRows[rowIndex] || { time: "", foods: "" };
+
+    if (!row.time && nextValue.trim() && rowIndex > 0) {
+      let targetIndex = rowIndex - 1;
+      while (targetIndex >= 0) {
+        const targetRow = visibleMemoRows[targetIndex] || { time: "", foods: "" };
+        if (targetRow.time || targetRow.foods) break;
+        targetIndex -= 1;
+      }
+
+      if (targetIndex >= 0) {
+        const addition = nextValue.trimStart();
+        const targetRow = visibleMemoRows[targetIndex] || { time: "", foods: "" };
+        const nextTargetFoods = appendMemoFoods(targetRow.foods, addition);
+
+        updateMemoRows((rows) => {
+          const nextRows = [...rows];
+          while (nextRows.length <= rowIndex) nextRows.push({ time: "", foods: "" });
+          nextRows[targetIndex] = {
+            ...nextRows[targetIndex],
+            foods: appendMemoFoods(nextRows[targetIndex]?.foods, addition),
+          };
+          nextRows[rowIndex] = { ...nextRows[rowIndex], foods: "" };
+          return nextRows;
+        }, { field: "food", index: targetIndex, cursor: nextTargetFoods.length });
+
+        setActiveMemoRowIndex(targetIndex);
+        setActiveMemoFoodCursor(nextTargetFoods.length);
+        setMemoPreviewHidden(false);
+        return;
+      }
+    }
+
     setActiveMemoRowIndex(rowIndex);
-    setActiveMemoFoodCursor(event.target.selectionStart ?? event.target.value.length);
+    setActiveMemoFoodCursor(event.target.selectionStart ?? nextValue.length);
     setMemoPreviewHidden(false);
-    updateMemoRowField(rowIndex, "foods", event.target.value);
+    updateMemoRowField(rowIndex, "foods", nextValue);
   };
 
   const updateActiveMemoFoodCursor = (rowIndex, target) => {
@@ -2380,9 +2472,44 @@ export default function App() {
     const tokens = segmentBeforeCursor.split(/\s+/).filter(Boolean);
     const lastToken = tokens.at(-1) || "";
     const hasFoodName = tokens.length >= 2;
+    const segmentIndex = getMemoSegmentIndex(row.foods, start);
+
+    const getCompletedUnitInput = () => {
+      if (tokens.length >= 2) {
+        const compact = parseQuantityUnitToken(lastToken);
+        if (compact?.quantity > 0 && compact.unitText) {
+          const name = cleanFoodName(tokens.slice(0, -1).join(""));
+          const basisFood = getMemoFoodBasis(memoFoodBasisMap, rowIndex, segmentIndex, 0, name);
+          if (name && resolveFoodUnitAmount(name, compact.quantity, compact.unitText, customFoods, basisFood) !== null) {
+            return compact;
+          }
+        }
+      }
+
+      if (tokens.length >= 3) {
+        const separated = parseQuantityUnitTokens(tokens.at(-2), lastToken);
+        if (separated?.quantity > 0 && separated.unitText) {
+          const name = cleanFoodName(tokens.slice(0, -2).join(""));
+          const basisFood = getMemoFoodBasis(memoFoodBasisMap, rowIndex, segmentIndex, 0, name);
+          if (name && resolveFoodUnitAmount(name, separated.quantity, separated.unitText, customFoods, basisFood) !== null) {
+            return separated;
+          }
+        }
+      }
+
+      return null;
+    };
 
     if (event.key === " ") {
-      if (start === end && hasFoodName && /^[0-9]+(?:\.[0-9]+)?$/.test(lastToken)) {
+      const completedUnitInput = start === end ? getCompletedUnitInput() : null;
+
+      if (completedUnitInput) {
+        event.preventDefault();
+        const nextFoods = before + ", " + after;
+        updateMemoRowField(rowIndex, "foods", nextFoods);
+        setActiveMemoFoodCursor(start + 2);
+        requestAnimationFrame(() => memoFoodRefs.current[rowIndex]?.setSelectionRange(start + 2, start + 2));
+      } else if (start === end && hasFoodName && /^[0-9]+(?:\.[0-9]+)?$/.test(lastToken)) {
         event.preventDefault();
         const nextFoods = before + "g, " + after;
         updateMemoRowField(rowIndex, "foods", nextFoods);
@@ -2419,7 +2546,6 @@ export default function App() {
     setActiveMemoFoodCursor(0);
     setMemoPreviewHidden(true);
   };
-
 
   const getMemoCursorContext = (start, end = start) => {
     const lineStart = memoInput.lastIndexOf("\n", Math.max(0, start - 1)) + 1;
@@ -2884,7 +3010,13 @@ export default function App() {
               items: meal.items.map((item) =>
                 item.id === amountTarget.itemId
                   ? resolveItem(
-                      { ...item, amount: nextAmount, rawLine: item.name + " " + nextAmount + "g" },
+                      {
+                        ...item,
+                        amount: nextAmount,
+                        rawLine: item.name + " " + nextAmount + "g",
+                        displayAmount: null,
+                        displayUnit: "",
+                      },
                       customFoods
                     )
                   : item
@@ -4428,7 +4560,13 @@ function FoodRow({ mealId, item, onLongPress, onOpenAmount, onOpenNutrition }) {
           {item.name}
           {showMatchedBasis && <span className="food-basis-inline">({matchedFoodName})</span>}
         </strong>
-        {item.amount > 0 && <span>{formatAmount(item.amount)}g</span>}
+        {item.amount > 0 && (
+          <span>
+            {item.displayUnit && toNumber(item.displayAmount) > 0
+              ? formatAmount(toNumber(item.displayAmount)) + item.displayUnit
+              : formatAmount(item.amount) + "g"}
+          </span>
+        )}
       </div>
 
       <div className="food-detail">
