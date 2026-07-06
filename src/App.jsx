@@ -1361,6 +1361,20 @@ function itemToMemoLine(item) {
   return item.name + (item.amount > 0 ? " " + formatAmount(item.amount) + "g" : "");
 }
 
+function getUnsupportedUnitItem(items) {
+  return (items || []).find((item) => item?.unsupportedUnit);
+}
+
+function makeUnsupportedUnitMessage(item, lineNumber) {
+  const foodName = cleanFoodName(item?.name || "이 음식");
+  const unitName = item?.displayUnit || item?.unsupportedUnitName || "해당 단위";
+  const quantity = toNumber(item?.displayAmount);
+  const quantityText = quantity > 0 ? formatAmount(quantity) : "";
+  const prefix = lineNumber ? lineNumber + "번째 줄: " : "";
+
+  return prefix + foodName + " " + quantityText + unitName + "는 아직 지원하지 않아. g으로 입력해줘. 예: " + foodName + " 100g";
+}
+
 function mealToDailyMemoLine(meal) {
   const items = meal.items.map((item) => itemToMemoLine(item)).join(", ");
   return meal.time + (items ? "\t" + items : "");
@@ -1505,7 +1519,12 @@ function parseFoodEntries(text, customFoods, options = {}) {
             attachedUnit.name + " " + formatAmount(attachedUnit.quantity) + attachedUnit.unitText,
             undefined,
             basisFood,
-            { displayAmount: attachedUnit.quantity, displayUnit: attachedUnit.unitText }
+            {
+              displayAmount: attachedUnit.quantity,
+              displayUnit: attachedUnit.unitText,
+              unsupportedUnit: true,
+              unsupportedUnitName: attachedUnit.unitText,
+            }
           ));
           entryIndex += 1;
           index += 1;
@@ -1541,7 +1560,12 @@ function parseFoodEntries(text, customFoods, options = {}) {
               name + " " + formatAmount(unitAmount.quantity) + unitAmount.unitText,
               undefined,
               basisFood,
-              { displayAmount: unitAmount.quantity, displayUnit: unitAmount.unitText }
+              {
+                displayAmount: unitAmount.quantity,
+                displayUnit: unitAmount.unitText,
+                unsupportedUnit: true,
+                unsupportedUnitName: unitAmount.unitText,
+              }
             ));
           }
 
@@ -1590,6 +1614,11 @@ function parseDailyMemoInput(input, customFoods, basisMap = {}) {
       }
 
       const items = parseFoodEntries(line, customFoods, { basisMap, rowIndex: originalIndex });
+      const unsupportedUnitItem = getUnsupportedUnitItem(items);
+      if (unsupportedUnitItem) {
+        errors.push(makeUnsupportedUnitMessage(unsupportedUnitItem, originalIndex + 1));
+        return;
+      }
       if (items.length === 0) {
         errors.push(`${originalIndex + 1}번째 줄: 음식명을 입력해 주세요.`);
         return;
@@ -1610,6 +1639,11 @@ function parseDailyMemoInput(input, customFoods, basisMap = {}) {
     }
 
     const items = parseFoodEntries(match[2], customFoods, { basisMap, rowIndex: originalIndex });
+    const unsupportedUnitItem = getUnsupportedUnitItem(items);
+    if (unsupportedUnitItem) {
+      errors.push(makeUnsupportedUnitMessage(unsupportedUnitItem, originalIndex + 1));
+      return;
+    }
     if (items.length === 0) {
       errors.push(`${originalIndex + 1}번째 줄: 음식명을 입력해 주세요.`);
       return;
