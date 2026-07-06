@@ -1460,14 +1460,24 @@ function resolveFoodUnitAmount(name, quantity, unitText, customFoods, basisFood)
   return cleanQuantity * toNumber(unit.grams);
 }
 
-function createItem(name, amount, customFoods, rawLine, id, basisFood) {
+function createItem(name, amount, customFoods, rawLine, id, basisFood, displayUnitInfo) {
   const cleanName = cleanFoodName(name);
   const cleanAmount = toNumber(amount);
+  const displayAmount = toNumber(displayUnitInfo?.quantity);
+  const displayUnit = cleanFoodName(displayUnitInfo?.unitText || "");
+  const hasDisplayUnit = displayAmount > 0 && displayUnit && !["g", "그램"].includes(normalize(displayUnit));
   const baseItem = {
     id: id || makeId("food"),
     rawLine: rawLine || cleanName + (cleanAmount > 0 ? " " + cleanAmount + "g" : ""),
     name: cleanName,
     amount: cleanAmount,
+    ...(hasDisplayUnit
+      ? {
+          displayAmount,
+          displayUnit,
+          displayGrams: cleanAmount,
+        }
+      : {}),
   };
 
   return basisFood ? applyFoodBasisToItem(baseItem, basisFood) : resolveItem(baseItem, customFoods);
@@ -1481,8 +1491,20 @@ function parseMemoLine(line, customFoods) {
   return entries[0] || createItem(rawLine, 0, customFoods, rawLine);
 }
 
+function getItemAmountLabel(item) {
+  const displayAmount = toNumber(item?.displayAmount);
+  const displayUnit = cleanFoodName(item?.displayUnit || "");
+
+  if (displayAmount > 0 && displayUnit) {
+    return formatAmount(displayAmount) + displayUnit;
+  }
+
+  return item?.amount > 0 ? formatAmount(item.amount) + "g" : "";
+}
+
 function itemToMemoLine(item) {
-  return item.name + (item.amount > 0 ? " " + formatAmount(item.amount) + "g" : "");
+  const amountLabel = getItemAmountLabel(item);
+  return item.name + (amountLabel ? " " + amountLabel : "");
 }
 
 function mealToDailyMemoLine(meal) {
@@ -1588,7 +1610,15 @@ function parseFoodEntries(text, customFoods, options = {}) {
           );
 
           if (amount !== null) {
-            entries.push(createItem(attachedUnit.name, amount, customFoods, attachedUnit.name + " " + formatAmount(amount) + "g", undefined, basisFood));
+            entries.push(createItem(
+              attachedUnit.name,
+              amount,
+              customFoods,
+              attachedUnit.name + " " + formatAmount(attachedUnit.quantity) + attachedUnit.unitText,
+              undefined,
+              basisFood,
+              { quantity: attachedUnit.quantity, unitText: attachedUnit.unitText }
+            ));
             entryIndex += 1;
             index += 1;
             continue;
@@ -1623,7 +1653,15 @@ function parseFoodEntries(text, customFoods, options = {}) {
           const amount = resolveFoodUnitAmount(name, unitAmount.quantity, unitAmount.unitText, customFoods, basisFood);
 
           if (amount !== null) {
-            entries.push(createItem(name, amount, customFoods, name + " " + formatAmount(amount) + "g", undefined, basisFood));
+            entries.push(createItem(
+              name,
+              amount,
+              customFoods,
+              name + " " + formatAmount(unitAmount.quantity) + unitAmount.unitText,
+              undefined,
+              basisFood,
+              { quantity: unitAmount.quantity, unitText: unitAmount.unitText }
+            ));
           } else if (unitFood) {
             const missingItem = createItem(name, 0, customFoods, name, undefined, unitFood);
             entries.push({
@@ -3113,7 +3151,14 @@ export default function App() {
               items: meal.items.map((item) =>
                 item.id === amountTarget.itemId
                   ? resolveItem(
-                      { ...item, amount: nextAmount, rawLine: item.name + " " + nextAmount + "g" },
+                      {
+                        ...item,
+                        amount: nextAmount,
+                        rawLine: item.name + " " + nextAmount + "g",
+                        displayAmount: null,
+                        displayUnit: "",
+                        displayGrams: null,
+                      },
                       customFoods
                     )
                   : item
@@ -4680,7 +4725,7 @@ function FoodRow({ mealId, item, onLongPress, onOpenAmount, onOpenNutrition }) {
           {item.name}
           {showMatchedBasis && <span className="food-basis-inline">({matchedFoodName})</span>}
         </strong>
-        {item.amount > 0 && <span>{formatAmount(item.amount)}g</span>}
+        {item.amount > 0 && <span>{getItemAmountLabel(item)}</span>}
       </div>
 
       <div className="food-detail">
