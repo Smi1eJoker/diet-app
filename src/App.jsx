@@ -2243,16 +2243,32 @@ export default function App() {
     .slice(Math.max(currentMemoBeforeCursor.lastIndexOf(","), currentMemoBeforeCursor.lastIndexOf("，")) + 1)
     .trim();
   const memoPreviewTokens = currentMemoSegment.split(/\s+/).filter(Boolean);
-  const rawMemoPreviewName = memoCursorIsAttachedToWord
-    ? memoPreviewTokens.at(-1)?.toLocaleLowerCase("ko-KR") === "g"
-      ? memoPreviewTokens.at(-2)
-      : memoPreviewTokens.at(-1)
-    : "";
-  const memoPreviewName = rawMemoPreviewName &&
-    !/^\d{1,2}:?\d{0,2}$/.test(rawMemoPreviewName) &&
-    !/^[0-9]+(?:\.[0-9]+)?(?:g|그램)?$/i.test(rawMemoPreviewName)
-      ? cleanFoodName(rawMemoPreviewName)
-      : "";
+  const getMemoPreviewName = () => {
+    if (!memoCursorIsAttachedToWord || memoPreviewTokens.length === 0) return "";
+
+    const lastToken = memoPreviewTokens.at(-1) || "";
+    const previousToken = memoPreviewTokens.at(-2) || "";
+    const compactUnit = parseQuantityUnitToken(lastToken);
+
+    // 예: "계란 1개" 상태에서 마지막 토큰인 "1개"를 음식명으로 보지 않는다.
+    // 후보창이 필요하면 앞의 음식명인 "계란" 기준으로만 연다.
+    if (compactUnit?.quantity > 0 && compactUnit.unitText) {
+      return memoPreviewTokens.length >= 2 ? cleanFoodName(memoPreviewTokens.slice(0, -1).join("")) : "";
+    }
+
+    const separatedUnit = parseQuantityUnitTokens(previousToken, lastToken);
+    if (separatedUnit?.quantity > 0 && separatedUnit.unitText) {
+      return memoPreviewTokens.length >= 3 ? cleanFoodName(memoPreviewTokens.slice(0, -2).join("")) : "";
+    }
+
+    const rawName = lastToken.toLocaleLowerCase("ko-KR") === "g" ? previousToken : lastToken;
+    if (!rawName) return "";
+    if (/^\d{1,2}:?\d{0,2}$/.test(rawName)) return "";
+    if (/^[0-9]+(?:\.[0-9]+)?(?:g|그램)?$/i.test(rawName)) return "";
+
+    return cleanFoodName(rawName);
+  };
+  const memoPreviewName = getMemoPreviewName();
   const isSavedAliasPreviewFood = (food) =>
   Boolean(
     memoPreviewName &&
