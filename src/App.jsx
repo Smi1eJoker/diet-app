@@ -908,7 +908,6 @@ function getFoodSearchableNames(food) {
     food?.normalizedName,
     getFoodDisplayName(food),
     food?.rawName,
-    food?.category,
   ]
     .map((value) => normalize(value || ""))
     .filter(Boolean);
