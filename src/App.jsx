@@ -1948,13 +1948,32 @@ export default function App() {
       ? cleanFoodName(rawMemoPreviewName)
       : "";
   const isSavedAliasPreviewFood = (food) =>
-    Boolean(
-      memoPreviewName &&
-        food?.source === "user_alias" &&
-        normalize(food.name) === normalize(memoPreviewName)
-    );
-  const memoPreviewFoods = memoPreviewName ? findFoodMatches(memoPreviewName, customFoods) : [];
-  const showMemoDbPreview = Boolean(memoPreviewName && activeMemoRow.foods.trim() && !memoPreviewHidden);
+  Boolean(
+    memoPreviewName &&
+      food?.source === "user_alias" &&
+      normalize(food.name) === normalize(memoPreviewName)
+  );
+
+  const savedAliasPreviewFood = memoPreviewName
+    ? findExactFoodByName(memoPreviewName, customFoods)
+    : null;
+
+  const shouldHideMemoPreviewBySavedAlias = Boolean(
+    savedAliasPreviewFood &&
+      savedAliasPreviewFood.source === "user_alias" &&
+      normalize(savedAliasPreviewFood.name) === normalize(memoPreviewName)
+  );
+
+  const memoPreviewFoods = memoPreviewName && !shouldHideMemoPreviewBySavedAlias
+    ? findFoodMatches(memoPreviewName, customFoods)
+    : [];
+
+  const showMemoDbPreview = Boolean(
+    memoPreviewName &&
+      activeMemoRow.foods.trim() &&
+      !memoPreviewHidden &&
+      !shouldHideMemoPreviewBySavedAlias
+  );
 
   const today = new Intl.DateTimeFormat("ko-KR", {
     year: "numeric",
