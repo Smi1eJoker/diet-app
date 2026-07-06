@@ -93,9 +93,9 @@ const BASE_FOOD_DB = [];
 const BUILT_IN_FOOD_ALIASES = [];
 
 const MEMO_EXAMPLE_ROWS = [
-  { time: "06:30", foods: "오트밀 80g, 바나나 1개, 계란 3개" },
-  { time: "12:30", foods: "밥 250g, 닭가슴살 200g, 브로콜리 100g" },
-  { time: "18:30", foods: "밥 200g, 연어 180g, 고구마 250g" },
+  { time: "06:30", foods: "밥 200g, 닭가슴살 270g" },
+  { time: "12:30", foods: "밥 250g, 닭가슴살 200g" },
+  { time: "18:30", foods: "고구마 250g, 계란 3개" },
 ];
 
 
@@ -358,7 +358,7 @@ async function upsertUserFood(session, food) {
   };
 
   const rows = await requestSupabaseRest(
-    "/user_aliases?on_conflict=user_id,alias_norm",
+    "/user_foods?on_conflict=user_id,food_name_norm",
     {
       method: "POST",
       body: payload,
@@ -386,7 +386,7 @@ async function upsertUserAlias(session, aliasText, food) {
   };
 
   const rows = await requestSupabaseRest(
-    "/user_foods?on_conflict=user_id,food_name_norm",
+    "/user_aliases?on_conflict=user_id,alias_norm",
     {
       method: "POST",
       body: payload,
@@ -2438,7 +2438,7 @@ export default function App() {
       try {
         await upsertUserAlias(authSession, aliasName, food);
       } catch (error) {
-        setFormError((error.message || "별칭 저장에 실패했어.") + " 로컬에는 반영했어.");
+        console.warn("별칭 저장 실패, 로컬 반영 유지:", error);
       }
     }
 
@@ -2465,7 +2465,7 @@ export default function App() {
       try {
         await upsertUserAlias(authSession, aliasName, food);
       } catch (error) {
-        setFormError((error.message || "별칭 저장에 실패했어.") + " 로컬에는 반영했어.");
+        console.warn("별칭 저장 실패, 로컬 반영 유지:", error);
       }
     }
 
@@ -2557,7 +2557,7 @@ export default function App() {
         });
         storedFood = toFoodEntry(savedRow, food.id);
       } catch (error) {
-        setFormError((error.message || "개인 음식 DB 저장에 실패했어.") + " 로컬에는 반영했어.");
+        console.warn("개인 음식 DB 저장 실패, 로컬 반영 유지:", error);
       }
     }
 
@@ -4146,7 +4146,7 @@ function MealCard({ meal, onToggle, onEditMeal, onLongPress, onFoodLongPress, on
           <div className="meal-summary-inline">
             <span className="meal-summary-kcal">{Math.round(mealTotals.kcal)} kcal</span>
             <span className="meal-summary-macros">
-              탄 {formatMacro(mealTotals.carb)}g · 단 {formatMacro(mealTotals.protein)}g · 지 {formatMacro(mealTotals.fat)}g
+              Carb {formatMacro(mealTotals.carb)}g · Pro {formatMacro(mealTotals.protein)}g · Fat {formatMacro(mealTotals.fat)}g
             </span>
           </div>
         </div>
