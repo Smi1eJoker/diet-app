@@ -1180,6 +1180,27 @@ function findFoodUnit(food, unitText) {
   return (food?.units || []).find((unit) => getFoodUnitAliases(unit).includes(normalizedUnit)) || null;
 }
 
+function isEggUnitInput(name, unitText) {
+  const normalizedName = normalize(name);
+  const normalizedUnit = normalize(unitText);
+  return ["개", "알"].includes(normalizedUnit) && ["계란", "달걀"].some((keyword) => normalizedName.includes(keyword));
+}
+
+function findFoodForUnitAmount(name, unitText, customFoods, basisFood) {
+  if (basisFood) return basisFood;
+
+  const exactFood = findFoodByName(name, customFoods);
+  if (exactFood && findFoodUnit(exactFood, unitText)) return exactFood;
+
+  // 계란/달걀의 개·알 단위는 앱 공통 단위로 허용한다.
+  // food_search_terms는 일반 자동 확정에는 쓰지 않지만, 계란 단위 입력만 예외적으로 후보 중 단위가 있는 음식을 사용한다.
+  if (isEggUnitInput(name, unitText)) {
+    return findFoodMatches(name, customFoods).find((food) => findFoodUnit(food, unitText)) || exactFood || null;
+  }
+
+  return exactFood;
+}
+
 function parseKoreanQuantity(value) {
   const text = normalize(value);
   if (!text) return null;
@@ -1284,18 +1305,30 @@ function parseAttachedFoodUnitToken(token) {
   };
 }
 
-function resolveFoodUnitAmount(name, quantity, unitText, customFoods, basisFood) {
+function resolveFoodUnitInfo(name, quantity, unitText, customFoods, basisFood) {
   const cleanQuantity = toNumber(quantity);
   if (cleanQuantity <= 0) return null;
 
   const normalizedUnit = normalize(unitText);
-  if (["g", "그램"].includes(normalizedUnit)) return cleanQuantity;
+  if (["g", "그램"].includes(normalizedUnit)) {
+    return {
+      amount: cleanQuantity,
+      food: basisFood || findFoodByName(name, customFoods) || null,
+    };
+  }
 
-  const food = basisFood || findFoodByName(name, customFoods);
+  const food = findFoodForUnitAmount(name, unitText, customFoods, basisFood);
   const unit = findFoodUnit(food, unitText);
   if (!unit) return null;
 
-  return cleanQuantity * toNumber(unit.grams);
+  return {
+    amount: cleanQuantity * toNumber(unit.grams),
+    food,
+  };
+}
+
+function resolveFoodUnitAmount(name, quantity, unitText, customFoods, basisFood) {
+  return resolveFoodUnitInfo(name, quantity, unitText, customFoods, basisFood)?.amount ?? null;
 }
 
 function createItem(name, amount, customFoods, rawLine, id, basisFood, displayInfo = {}) {
@@ -1442,7 +1475,7 @@ function parseFoodEntries(text, customFoods, options = {}) {
         const attachedUnit = parseAttachedFoodUnitToken(token);
         if (attachedUnit?.name) {
           const basisFood = getMemoFoodBasis(basisMap, rowIndex, segmentIndex, entryIndex, attachedUnit.name);
-          const amount = resolveFoodUnitAmount(
+          const unitInfo = resolveFoodUnitInfo(
             attachedUnit.name,
             attachedUnit.quantity,
             attachedUnit.unitText,
@@ -1450,20 +1483,33 @@ function parseFoodEntries(text, customFoods, options = {}) {
             basisFood
           );
 
-          if (amount !== null) {
+          if (unitInfo) {
             entries.push(createItem(
               attachedUnit.name,
-              amount,
+              unitInfo.amount,
               customFoods,
               attachedUnit.name + " " + formatAmount(attachedUnit.quantity) + attachedUnit.unitText,
               undefined,
-              basisFood,
+              unitInfo.food || basisFood,
               { displayAmount: attachedUnit.quantity, displayUnit: attachedUnit.unitText }
             ));
             entryIndex += 1;
             index += 1;
             continue;
           }
+
+          entries.push(createItem(
+            attachedUnit.name,
+            0,
+            customFoods,
+            attachedUnit.name + " " + formatAmount(attachedUnit.quantity) + attachedUnit.unitText,
+            undefined,
+            basisFood,
+            { displayAmount: attachedUnit.quantity, displayUnit: attachedUnit.unitText }
+          ));
+          entryIndex += 1;
+          index += 1;
+          continue;
         }
 
         const nextToken = tokens[index + 1] || "";
@@ -1475,20 +1521,28 @@ function parseFoodEntries(text, customFoods, options = {}) {
         const unitAmount = parseQuantityUnitTokens(nextToken, nextNextToken);
         if (name && unitAmount) {
           const basisFood = getMemoFoodBasis(basisMap, rowIndex, segmentIndex, entryIndex, name);
-          const amount = resolveFoodUnitAmount(name, unitAmount.quantity, unitAmount.unitText, customFoods, basisFood);
+          const unitInfo = resolveFoodUnitInfo(name, unitAmount.quantity, unitAmount.unitText, customFoods, basisFood);
 
-          if (amount !== null) {
+          if (unitInfo) {
             entries.push(createItem(
               name,
-              amount,
+              unitInfo.amount,
+              customFoods,
+              name + " " + formatAmount(unitAmount.quantity) + unitAmount.unitText,
+              undefined,
+              unitInfo.food || basisFood,
+              { displayAmount: unitAmount.quantity, displayUnit: unitAmount.unitText }
+            ));
+          } else {
+            entries.push(createItem(
+              name,
+              0,
               customFoods,
               name + " " + formatAmount(unitAmount.quantity) + unitAmount.unitText,
               undefined,
               basisFood,
               { displayAmount: unitAmount.quantity, displayUnit: unitAmount.unitText }
             ));
-          } else {
-            entries.push(createItem(name, 0, customFoods, name, undefined, basisFood));
           }
 
           entryIndex += 1;
