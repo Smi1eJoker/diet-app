@@ -242,65 +242,33 @@ function toFoodEntry(row, fallbackId) {
   };
 }
 
-function makeFoodUnitFromRow(row, source = "common") {
-  const unit = {
-    unitId: row.unit_id || row.user_unit_id || null,
-    unitName: cleanFoodName(row.unit_name || ""),
-    grams: toNumber(row.grams),
-    isDefault: Boolean(row.is_default),
-    aliases: Array.isArray(row.aliases) ? row.aliases.map(cleanFoodName).filter(Boolean) : [],
-    source,
-  };
-
-  return unit.unitName && unit.grams > 0 ? unit : null;
-}
-
-function addFoodUnitToBucket(bucket, key, row, source = "common") {
-  if (!key) return;
-  const unit = makeFoodUnitFromRow(row, source);
-  if (!unit) return;
-  bucket[String(key)] = [...(bucket[String(key)] || []), unit];
-}
-
-function mergeFoodUnits(userUnits = [], commonUnits = []) {
-  const seen = new Set();
-  const merged = [];
-
-  [...userUnits, ...commonUnits].forEach((unit) => {
-    const key = normalize(unit.unitName);
-    if (!key || seen.has(key)) return;
-    seen.add(key);
-    merged.push(unit);
-  });
-
-  return merged;
-}
-
-function buildFoodMap(appFoods = [], userAliases = [], userFoods = [], foodSearchTerms = [], foodUnits = [], userFoodUnits = []) {
+function buildFoodMap(appFoods = [], userAliases = [], userFoods = [], foodSearchTerms = [], foodUnits = []) {
   const nextMap = {};
   const appFoodsById = {};
   const userFoodsById = {};
-  const commonUnitsByAppFoodId = {};
-  const userUnitsByAppFoodId = {};
-  const userUnitsByUserFoodId = {};
+  const unitsByAppFoodId = {};
 
   foodUnits.forEach((row) => {
     if (!row.app_food_id) return;
-    addFoodUnitToBucket(commonUnitsByAppFoodId, row.app_food_id, row, "common");
-  });
+    const key = String(row.app_food_id);
+    const unit = {
+      unitId: row.unit_id || null,
+      unitName: cleanFoodName(row.unit_name || ""),
+      grams: toNumber(row.grams),
+      isDefault: Boolean(row.is_default),
+      aliases: Array.isArray(row.aliases) ? row.aliases.map(cleanFoodName).filter(Boolean) : [],
+    };
 
-  userFoodUnits.forEach((row) => {
-    if (row.app_food_id) addFoodUnitToBucket(userUnitsByAppFoodId, row.app_food_id, row, "user");
-    if (row.user_food_id) addFoodUnitToBucket(userUnitsByUserFoodId, row.user_food_id, row, "user");
+    if (!unit.unitName || unit.grams <= 0) return;
+    unitsByAppFoodId[key] = [...(unitsByAppFoodId[key] || []), unit];
   });
 
   appFoods.forEach((row) => {
     const food = toFoodEntry(row);
     if (!food.name) return;
-    const appFoodId = food.appFoodId ? String(food.appFoodId) : "";
     const foodWithUnits = {
       ...food,
-      units: appFoodId ? mergeFoodUnits(userUnitsByAppFoodId[appFoodId], commonUnitsByAppFoodId[appFoodId]) : [],
+      units: food.appFoodId ? (unitsByAppFoodId[String(food.appFoodId)] || []) : [],
     };
     nextMap[normalize(foodWithUnits.name)] = foodWithUnits;
     if (foodWithUnits.appFoodId) appFoodsById[String(foodWithUnits.appFoodId)] = foodWithUnits;
@@ -309,13 +277,8 @@ function buildFoodMap(appFoods = [], userAliases = [], userFoods = [], foodSearc
   userFoods.forEach((row) => {
     const food = toFoodEntry(row, "user-" + normalize(row.food_name));
     if (!food.name) return;
-    const userFoodId = food.userFoodId ? String(food.userFoodId) : "";
-    const foodWithUnits = {
-      ...food,
-      units: userFoodId ? mergeFoodUnits(userUnitsByUserFoodId[userFoodId], []) : [],
-    };
-    nextMap[normalize(foodWithUnits.name)] = foodWithUnits;
-    if (foodWithUnits.userFoodId) userFoodsById[String(foodWithUnits.userFoodId)] = foodWithUnits;
+    nextMap[normalize(food.name)] = food;
+    if (food.userFoodId) userFoodsById[String(food.userFoodId)] = food;
   });
 
   // 후보 추천 전용 검색어다. 자동 계산에는 쓰지 않는다.
@@ -390,20 +353,16 @@ async function fetchFoodDatabase(session) {
   const userFoodsPromise = userId && accessToken
     ? safeUserRequest(requestSupabaseRest("/user_foods?select=*&user_id=eq." + encodeURIComponent(userId), {}, accessToken))
     : Promise.resolve([]);
-  const userFoodUnitsPromise = userId && accessToken
-    ? safeUserRequest(requestSupabaseRest("/user_food_units?select=unit_id,user_id,app_food_id,user_food_id,unit_name,grams,aliases&user_id=eq." + encodeURIComponent(userId), {}, accessToken))
-    : Promise.resolve([]);
 
-  const [appFoods, userAliases, userFoods, foodSearchTerms, foodUnits, userFoodUnits] = await Promise.all([
+  const [appFoods, userAliases, userFoods, foodSearchTerms, foodUnits] = await Promise.all([
     appFoodsPromise,
     userAliasesPromise,
     userFoodsPromise,
     foodSearchTermsPromise,
     foodUnitsPromise,
-    userFoodUnitsPromise,
   ]);
 
-  return buildFoodMap(appFoods || [], userAliases || [], userFoods || [], foodSearchTerms || [], foodUnits || [], userFoodUnits || []);
+  return buildFoodMap(appFoods || [], userAliases || [], userFoods || [], foodSearchTerms || [], foodUnits || []);
 }
 
 async function upsertUserFood(session, food) {
@@ -455,46 +414,6 @@ async function upsertUserAlias(session, aliasText, food) {
       method: "POST",
       body: payload,
       prefer: "resolution=merge-duplicates,return=representation",
-    },
-    session?.access_token
-  );
-
-  return Array.isArray(rows) && rows[0] ? rows[0] : payload;
-}
-
-async function upsertUserFoodUnit(session, food, unitName, grams) {
-  const userId = getSessionUserId(session);
-  if (!userId) throw new Error("사용자 정보를 확인하지 못했어.");
-
-  const appFoodId = food?.appFoodId || food?.app_food_id || null;
-  const userFoodId = food?.userFoodId || food?.user_food_id || null;
-  if (!appFoodId && !userFoodId) throw new Error("단위를 연결할 음식 ID를 확인하지 못했어.");
-
-  const cleanUnitName = cleanFoodName(unitName);
-  const cleanGrams = toNumber(grams);
-  if (!cleanUnitName || cleanGrams <= 0) throw new Error("단위와 g 값을 확인해줘.");
-
-  let deletePath = "/user_food_units?user_id=eq." + encodeURIComponent(userId) + "&unit_name=eq." + encodeURIComponent(cleanUnitName);
-  if (appFoodId) deletePath += "&app_food_id=eq." + encodeURIComponent(appFoodId);
-  if (userFoodId) deletePath += "&user_food_id=eq." + encodeURIComponent(userFoodId);
-
-  await requestSupabaseRest(deletePath, { method: "DELETE" }, session?.access_token);
-
-  const payload = {
-    user_id: userId,
-    app_food_id: appFoodId,
-    user_food_id: userFoodId,
-    unit_name: cleanUnitName,
-    grams: cleanGrams,
-    aliases: buildUnitAliases(cleanUnitName),
-  };
-
-  const rows = await requestSupabaseRest(
-    "/user_food_units",
-    {
-      method: "POST",
-      body: payload,
-      prefer: "return=representation",
     },
     session?.access_token
   );
@@ -1261,87 +1180,6 @@ function findFoodUnit(food, unitText) {
   return (food?.units || []).find((unit) => getFoodUnitAliases(unit).includes(normalizedUnit)) || null;
 }
 
-function buildUnitAliases(unitName) {
-  const cleanUnit = cleanFoodName(unitName);
-  if (!cleanUnit) return [];
-  return [cleanUnit, "한" + cleanUnit, "1" + cleanUnit]
-    .map(cleanFoodName)
-    .filter(Boolean);
-}
-
-function buildLocalFoodUnit(unitName, grams) {
-  const cleanUnitName = cleanFoodName(unitName);
-  return {
-    unitId: "local-unit-" + normalize(cleanUnitName),
-    unitName: cleanUnitName,
-    grams: toNumber(grams),
-    isDefault: false,
-    aliases: buildUnitAliases(cleanUnitName),
-    source: "user",
-  };
-}
-
-function upsertFoodUnitInList(units = [], nextUnit) {
-  if (!nextUnit?.unitName || toNumber(nextUnit.grams) <= 0) return units || [];
-  const nextKey = normalize(nextUnit.unitName);
-  return [nextUnit, ...(units || []).filter((unit) => normalize(unit.unitName) !== nextKey)];
-}
-
-function isSameFoodTarget(a, b) {
-  if (!a || !b) return false;
-  if (a.appFoodId && b.appFoodId && String(a.appFoodId) === String(b.appFoodId)) return true;
-  if (a.userFoodId && b.userFoodId && String(a.userFoodId) === String(b.userFoodId)) return true;
-  return normalize(getFoodDisplayName(a)) === normalize(getFoodDisplayName(b));
-}
-
-function addUnitToFoodMap(customFoods, targetFood, unitName, grams) {
-  const nextUnit = buildLocalFoodUnit(unitName, grams);
-  const nextFoods = {};
-  let matched = false;
-
-  Object.entries(customFoods || {}).forEach(([key, food]) => {
-    if (isSameFoodTarget(food, targetFood)) {
-      matched = true;
-      nextFoods[key] = {
-        ...food,
-        units: upsertFoodUnitInList(food.units, nextUnit),
-      };
-      return;
-    }
-    nextFoods[key] = food;
-  });
-
-  if (!matched && targetFood) {
-    const key = normalize(getFoodDisplayName(targetFood) || targetFood.name);
-    if (key) {
-      nextFoods[key] = {
-        ...targetFood,
-        units: upsertFoodUnitInList(targetFood.units, nextUnit),
-      };
-    }
-  }
-
-  return nextFoods;
-}
-
-function findFirstMissingFoodUnit(meals) {
-  for (const meal of meals || []) {
-    for (const item of meal.items || []) {
-      if (item?.missingUnit?.food) {
-        return {
-          mealId: meal.id,
-          itemId: item.id,
-          name: item.name,
-          quantity: item.missingUnit.quantity,
-          unitText: item.missingUnit.unitText,
-          food: item.missingUnit.food,
-        };
-      }
-    }
-  }
-  return null;
-}
-
 function parseKoreanQuantity(value) {
   const text = normalize(value);
   if (!text) return null;
@@ -1460,24 +1298,14 @@ function resolveFoodUnitAmount(name, quantity, unitText, customFoods, basisFood)
   return cleanQuantity * toNumber(unit.grams);
 }
 
-function createItem(name, amount, customFoods, rawLine, id, basisFood, displayUnitInfo) {
+function createItem(name, amount, customFoods, rawLine, id, basisFood) {
   const cleanName = cleanFoodName(name);
   const cleanAmount = toNumber(amount);
-  const displayAmount = toNumber(displayUnitInfo?.quantity);
-  const displayUnit = cleanFoodName(displayUnitInfo?.unitText || "");
-  const hasDisplayUnit = displayAmount > 0 && displayUnit && !["g", "그램"].includes(normalize(displayUnit));
   const baseItem = {
     id: id || makeId("food"),
     rawLine: rawLine || cleanName + (cleanAmount > 0 ? " " + cleanAmount + "g" : ""),
     name: cleanName,
     amount: cleanAmount,
-    ...(hasDisplayUnit
-      ? {
-          displayAmount,
-          displayUnit,
-          displayGrams: cleanAmount,
-        }
-      : {}),
   };
 
   return basisFood ? applyFoodBasisToItem(baseItem, basisFood) : resolveItem(baseItem, customFoods);
@@ -1491,20 +1319,8 @@ function parseMemoLine(line, customFoods) {
   return entries[0] || createItem(rawLine, 0, customFoods, rawLine);
 }
 
-function getItemAmountLabel(item) {
-  const displayAmount = toNumber(item?.displayAmount);
-  const displayUnit = cleanFoodName(item?.displayUnit || "");
-
-  if (displayAmount > 0 && displayUnit) {
-    return formatAmount(displayAmount) + displayUnit;
-  }
-
-  return item?.amount > 0 ? formatAmount(item.amount) + "g" : "";
-}
-
 function itemToMemoLine(item) {
-  const amountLabel = getItemAmountLabel(item);
-  return item.name + (amountLabel ? " " + amountLabel : "");
+  return item.name + (item.amount > 0 ? " " + formatAmount(item.amount) + "g" : "");
 }
 
 function mealToDailyMemoLine(meal) {
@@ -1600,7 +1416,6 @@ function parseFoodEntries(text, customFoods, options = {}) {
         const attachedUnit = parseAttachedFoodUnitToken(token);
         if (attachedUnit?.name) {
           const basisFood = getMemoFoodBasis(basisMap, rowIndex, segmentIndex, entryIndex, attachedUnit.name);
-          const unitFood = basisFood || findFoodByName(attachedUnit.name, customFoods);
           const amount = resolveFoodUnitAmount(
             attachedUnit.name,
             attachedUnit.quantity,
@@ -1610,30 +1425,7 @@ function parseFoodEntries(text, customFoods, options = {}) {
           );
 
           if (amount !== null) {
-            entries.push(createItem(
-              attachedUnit.name,
-              amount,
-              customFoods,
-              attachedUnit.name + " " + formatAmount(attachedUnit.quantity) + attachedUnit.unitText,
-              undefined,
-              basisFood,
-              { quantity: attachedUnit.quantity, unitText: attachedUnit.unitText }
-            ));
-            entryIndex += 1;
-            index += 1;
-            continue;
-          }
-
-          if (unitFood) {
-            const missingItem = createItem(attachedUnit.name, 0, customFoods, attachedUnit.name, undefined, unitFood);
-            entries.push({
-              ...missingItem,
-              missingUnit: {
-                quantity: attachedUnit.quantity,
-                unitText: attachedUnit.unitText,
-                food: unitFood,
-              },
-            });
+            entries.push(createItem(attachedUnit.name, amount, customFoods, attachedUnit.name + " " + formatAmount(amount) + "g", undefined, basisFood));
             entryIndex += 1;
             index += 1;
             continue;
@@ -1649,29 +1441,10 @@ function parseFoodEntries(text, customFoods, options = {}) {
         const unitAmount = parseQuantityUnitTokens(nextToken, nextNextToken);
         if (name && unitAmount) {
           const basisFood = getMemoFoodBasis(basisMap, rowIndex, segmentIndex, entryIndex, name);
-          const unitFood = basisFood || findFoodByName(name, customFoods);
           const amount = resolveFoodUnitAmount(name, unitAmount.quantity, unitAmount.unitText, customFoods, basisFood);
 
           if (amount !== null) {
-            entries.push(createItem(
-              name,
-              amount,
-              customFoods,
-              name + " " + formatAmount(unitAmount.quantity) + unitAmount.unitText,
-              undefined,
-              basisFood,
-              { quantity: unitAmount.quantity, unitText: unitAmount.unitText }
-            ));
-          } else if (unitFood) {
-            const missingItem = createItem(name, 0, customFoods, name, undefined, unitFood);
-            entries.push({
-              ...missingItem,
-              missingUnit: {
-                quantity: unitAmount.quantity,
-                unitText: unitAmount.unitText,
-                food: unitFood,
-              },
-            });
+            entries.push(createItem(name, amount, customFoods, name + " " + formatAmount(amount) + "g", undefined, basisFood));
           } else {
             entries.push(createItem(name, 0, customFoods, name, undefined, basisFood));
           }
@@ -1932,8 +1705,6 @@ export default function App() {
   const [nutritionForm, setNutritionForm] = useState({ baseAmount: "100", kcal: "", carb: "", protein: "", fat: "" });
   const [amountTarget, setAmountTarget] = useState(null);
   const [amountInput, setAmountInput] = useState("");
-  const [unitTarget, setUnitTarget] = useState(null);
-  const [unitGramInput, setUnitGramInput] = useState("");
   const [foodEditTarget, setFoodEditTarget] = useState(null);
   const [foodEditForm, setFoodEditForm] = useState({ name: "", amount: "" });
   const [actionTarget, setActionTarget] = useState(null);
@@ -1945,7 +1716,6 @@ export default function App() {
   const memoFoodRefs = useRef([]);
   const skipNextMemoSyncRef = useRef(false);
   const amountInputRef = useRef(null);
-  const unitGramInputRef = useRef(null);
   const foodEditAmountRef = useRef(null);
   const cloudSaveTimerRef = useRef(null);
   const finishDayLongPressProps = useLongPress(() => setActionTarget({ type: "day" }));
@@ -2683,20 +2453,12 @@ export default function App() {
     setMemoCursorIndex(cursor);
   };
 
-  const saveMemoValue = (value, foodsForParsing = customFoods, options = {}) => {
+  const saveMemoValue = (value) => {
     if (dayComplete) return false;
 
-    const parsed = parseDailyMemoInput(value, foodsForParsing, memoFoodBasisMap);
+    const parsed = parseDailyMemoInput(value, customFoods, memoFoodBasisMap);
     if (parsed.errors.length > 0) {
       setFormError(parsed.errors[0]);
-      return false;
-    }
-
-    const missingUnit = findFirstMissingFoodUnit(parsed.meals);
-    if (missingUnit && options.allowUnitRegistration !== false) {
-      setUnitTarget({ ...missingUnit, memoValue: value });
-      setUnitGramInput("");
-      requestAnimationFrame(() => unitGramInputRef.current?.focus());
       return false;
     }
 
@@ -3097,35 +2859,6 @@ export default function App() {
     closeMatchChoice();
   };
 
-  const closeUnitModal = () => {
-    setUnitTarget(null);
-    setUnitGramInput("");
-  };
-
-  const saveUnitRegistration = async (event) => {
-    event.preventDefault();
-    if (!unitTarget?.food) return;
-
-    const grams = toNumber(unitGramInput);
-    if (grams <= 0) return;
-
-    const unitName = cleanFoodName(unitTarget.unitText);
-    const nextCustomFoods = addUnitToFoodMap(customFoods, unitTarget.food, unitName, grams);
-
-    if (HAS_SUPABASE_CONFIG && authSession) {
-      try {
-        await upsertUserFoodUnit(authSession, unitTarget.food, unitName, grams);
-      } catch (error) {
-        console.warn("개인 단위 저장 실패, 로컬 반영 유지:", error);
-      }
-    }
-
-    setCustomFoods(nextCustomFoods);
-    const memoValue = unitTarget.memoValue || memoInput;
-    closeUnitModal();
-    saveMemoValue(memoValue, nextCustomFoods, { allowUnitRegistration: false });
-  };
-
   const openAmountModal = (mealId, item) => {
     setAmountTarget({ mealId, itemId: item.id, name: item.name });
     setAmountInput(item.amount > 0 ? String(item.amount) : "");
@@ -3151,14 +2884,7 @@ export default function App() {
               items: meal.items.map((item) =>
                 item.id === amountTarget.itemId
                   ? resolveItem(
-                      {
-                        ...item,
-                        amount: nextAmount,
-                        rawLine: item.name + " " + nextAmount + "g",
-                        displayAmount: null,
-                        displayUnit: "",
-                        displayGrams: null,
-                      },
+                      { ...item, amount: nextAmount, rawLine: item.name + " " + nextAmount + "g" },
                       customFoods
                     )
                   : item
@@ -3497,29 +3223,6 @@ export default function App() {
               />
             </label>
             <ModalActions onCancel={closeAmountModal} submitText="등록" />
-          </form>
-        </Modal>
-      )}
-
-      {unitTarget && (
-        <Modal title={unitTarget.name + " 단위 등록"} onClose={closeUnitModal}>
-          <form className="modal-form" onSubmit={saveUnitRegistration}>
-            <label>
-              <span>{unitTarget.name} 1{unitTarget.unitText}은 몇 g?</span>
-              <input
-                ref={unitGramInputRef}
-                value={unitGramInput}
-                onChange={(event) => setUnitGramInput(event.target.value)}
-                type="number"
-                step="1"
-                min="1"
-                placeholder="예: 100"
-              />
-            </label>
-            <p className="modal-hint">
-              저장하면 앞으로 {unitTarget.name} {formatAmount(unitTarget.quantity)}{unitTarget.unitText} 입력 시 자동으로 {formatAmount(unitTarget.quantity)} × 등록 g으로 계산돼.
-            </p>
-            <ModalActions onCancel={closeUnitModal} submitText="저장" />
           </form>
         </Modal>
       )}
@@ -4725,7 +4428,7 @@ function FoodRow({ mealId, item, onLongPress, onOpenAmount, onOpenNutrition }) {
           {item.name}
           {showMatchedBasis && <span className="food-basis-inline">({matchedFoodName})</span>}
         </strong>
-        {item.amount > 0 && <span>{getItemAmountLabel(item)}</span>}
+        {item.amount > 0 && <span>{formatAmount(item.amount)}g</span>}
       </div>
 
       <div className="food-detail">
