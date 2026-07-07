@@ -242,25 +242,49 @@ function toFoodEntry(row, fallbackId) {
   };
 }
 
-function buildFoodMap(appFoods = [], userAliases = [], userFoods = [], foodSearchTerms = [], foodUnits = []) {
+function toFoodUnitEntry(row, source = "common") {
+  return {
+    userUnitId: row.user_unit_id || row.userUnitId || null,
+    unitId: row.unit_id || row.unitId || row.user_unit_id || null,
+    appFoodId: row.app_food_id || row.appFoodId || null,
+    userFoodId: row.user_food_id || row.userFoodId || null,
+    unitName: cleanFoodName(row.unit_name || row.unitName || ""),
+    grams: toNumber(row.grams),
+    isDefault: Boolean(row.is_default || row.isDefault),
+    aliases: Array.isArray(row.aliases) ? row.aliases.map(cleanFoodName).filter(Boolean) : [],
+    source,
+  };
+}
+
+function buildFoodMap(appFoods = [], userAliases = [], userFoods = [], foodSearchTerms = [], foodUnits = [], userFoodUnits = []) {
   const nextMap = {};
   const appFoodsById = {};
   const userFoodsById = {};
   const unitsByAppFoodId = {};
+  const unitsByUserFoodId = {};
 
   foodUnits.forEach((row) => {
     if (!row.app_food_id) return;
     const key = String(row.app_food_id);
-    const unit = {
-      unitId: row.unit_id || null,
-      unitName: cleanFoodName(row.unit_name || ""),
-      grams: toNumber(row.grams),
-      isDefault: Boolean(row.is_default),
-      aliases: Array.isArray(row.aliases) ? row.aliases.map(cleanFoodName).filter(Boolean) : [],
-    };
+    const unit = toFoodUnitEntry(row, "common");
 
     if (!unit.unitName || unit.grams <= 0) return;
     unitsByAppFoodId[key] = [...(unitsByAppFoodId[key] || []), unit];
+  });
+
+  userFoodUnits.forEach((row) => {
+    const unit = toFoodUnitEntry(row, "user");
+    if (!unit.unitName || unit.grams <= 0) return;
+
+    if (unit.appFoodId) {
+      const key = String(unit.appFoodId);
+      unitsByAppFoodId[key] = [unit, ...(unitsByAppFoodId[key] || [])];
+    }
+
+    if (unit.userFoodId) {
+      const key = String(unit.userFoodId);
+      unitsByUserFoodId[key] = [unit, ...(unitsByUserFoodId[key] || [])];
+    }
   });
 
   appFoods.forEach((row) => {
@@ -277,8 +301,12 @@ function buildFoodMap(appFoods = [], userAliases = [], userFoods = [], foodSearc
   userFoods.forEach((row) => {
     const food = toFoodEntry(row, "user-" + normalize(row.food_name));
     if (!food.name) return;
-    nextMap[normalize(food.name)] = food;
-    if (food.userFoodId) userFoodsById[String(food.userFoodId)] = food;
+    const foodWithUnits = {
+      ...food,
+      units: food.userFoodId ? (unitsByUserFoodId[String(food.userFoodId)] || []) : [],
+    };
+    nextMap[normalize(foodWithUnits.name)] = foodWithUnits;
+    if (foodWithUnits.userFoodId) userFoodsById[String(foodWithUnits.userFoodId)] = foodWithUnits;
   });
 
   // 후보 추천 전용 검색어다. 자동 계산에는 쓰지 않는다.
@@ -334,6 +362,7 @@ async function fetchFoodDatabase(session) {
   const appFoodsPath = "/app_foods?select=app_food_id,display_name,raw_food_id,category,default_unit,default_amount,search_priority,raw_foods(raw_food_id,raw_name,kcal_per_100g,carb_g_per_100g,protein_g_per_100g,fat_g_per_100g)&order=search_priority.desc,display_name.asc";
   const foodSearchTermsPath = "/food_search_terms?select=term_id,term_text,term_norm,app_food_id,weight&order=weight.desc,term_text.asc";
   const foodUnitsPath = "/food_units?select=unit_id,app_food_id,unit_name,grams,is_default,aliases&order=app_food_id.asc,unit_name.asc";
+  const userFoodUnitsPath = "/user_food_units?select=user_unit_id,user_id,app_food_id,user_food_id,unit_name,unit_norm,grams,created_at,updated_at&user_id=eq." + encodeURIComponent(userId || "") + "&order=updated_at.desc,unit_name.asc";
 
   // 기본 음식 DB는 사용자 로그인 토큰이 아니라 anon/publishable key로 불러온다.
   // 저장된 로그인 토큰이 만료되어도 app_foods/raw_foods는 계속 매칭되어야 한다.
@@ -356,16 +385,20 @@ async function fetchFoodDatabase(session) {
   const userFoodsPromise = userId && accessToken
     ? safeUserRequest(requestSupabaseRest("/user_foods?select=*&user_id=eq." + encodeURIComponent(userId), {}, accessToken))
     : Promise.resolve([]);
+  const userFoodUnitsPromise = userId && accessToken
+    ? safeUserRequest(requestSupabaseRest(userFoodUnitsPath, {}, accessToken))
+    : Promise.resolve([]);
 
-  const [appFoods, userAliases, userFoods, foodSearchTerms, foodUnits] = await Promise.all([
+  const [appFoods, userAliases, userFoods, foodSearchTerms, foodUnits, userFoodUnits] = await Promise.all([
     appFoodsPromise,
     userAliasesPromise,
     userFoodsPromise,
     foodSearchTermsPromise,
     foodUnitsPromise,
+    userFoodUnitsPromise,
   ]);
 
-  return buildFoodMap(appFoods || [], userAliases || [], userFoods || [], foodSearchTerms || [], foodUnits || []);
+  return buildFoodMap(appFoods || [], userAliases || [], userFoods || [], foodSearchTerms || [], foodUnits || [], userFoodUnits || []);
 }
 
 async function upsertUserFood(session, food) {
@@ -496,6 +529,106 @@ async function deleteUserFood(session, food) {
   );
 }
 
+
+
+async function upsertUserFoodUnit(session, food, unitName, grams) {
+  const userId = getSessionUserId(session);
+  if (!userId) throw new Error("사용자 정보를 확인하지 못했어.");
+
+  const ids = getFoodTargetIds(food);
+  if (!ids.appFoodId && !ids.userFoodId) throw new Error("단위를 연결할 음식을 먼저 선택해야 해.");
+
+  const cleanUnitName = cleanFoodName(unitName);
+  const unitNorm = normalize(cleanUnitName);
+  const cleanGrams = toNumber(grams);
+  if (!cleanUnitName || cleanGrams <= 0) throw new Error("단위명과 g을 확인해줘.");
+
+  const encodedUserId = encodeURIComponent(userId);
+  const targetQuery = ids.appFoodId
+    ? "&app_food_id=eq." + encodeURIComponent(ids.appFoodId)
+    : "&user_food_id=eq." + encodeURIComponent(ids.userFoodId);
+
+  const existingRows = await requestSupabaseRest(
+    "/user_food_units?select=user_unit_id&user_id=eq." + encodedUserId + targetQuery + "&unit_norm=eq." + encodeURIComponent(unitNorm),
+    {},
+    session?.access_token
+  );
+
+  const payload = {
+    user_id: userId,
+    app_food_id: ids.appFoodId,
+    user_food_id: ids.userFoodId,
+    unit_name: cleanUnitName,
+    grams: cleanGrams,
+  };
+
+  if (Array.isArray(existingRows) && existingRows[0]?.user_unit_id) {
+    const rows = await requestSupabaseRest(
+      "/user_food_units?user_id=eq." + encodedUserId + "&user_unit_id=eq." + encodeURIComponent(existingRows[0].user_unit_id),
+      {
+        method: "PATCH",
+        body: { unit_name: cleanUnitName, grams: cleanGrams },
+        prefer: "return=representation",
+      },
+      session?.access_token
+    );
+
+    return Array.isArray(rows) && rows[0] ? rows[0] : { ...payload, user_unit_id: existingRows[0].user_unit_id };
+  }
+
+  const rows = await requestSupabaseRest(
+    "/user_food_units",
+    {
+      method: "POST",
+      body: payload,
+      prefer: "return=representation",
+    },
+    session?.access_token
+  );
+
+  return Array.isArray(rows) && rows[0] ? rows[0] : payload;
+}
+
+async function updateUserFoodUnit(session, unit, form) {
+  const userId = getSessionUserId(session);
+  if (!userId) throw new Error("사용자 정보를 확인하지 못했어.");
+
+  const unitId = unit?.userUnitId || unit?.user_unit_id;
+  if (!unitId) throw new Error("수정할 단위 ID를 확인하지 못했어.");
+
+  const payload = {
+    unit_name: cleanFoodName(form.unitName || unit.unitName),
+    grams: toNumber(form.grams),
+  };
+
+  if (!payload.unit_name || payload.grams <= 0) throw new Error("단위명과 g을 확인해줘.");
+
+  const rows = await requestSupabaseRest(
+    "/user_food_units?user_id=eq." + encodeURIComponent(userId) + "&user_unit_id=eq." + encodeURIComponent(unitId),
+    {
+      method: "PATCH",
+      body: payload,
+      prefer: "return=representation",
+    },
+    session?.access_token
+  );
+
+  return Array.isArray(rows) && rows[0] ? rows[0] : { ...unit, ...payload, user_unit_id: unitId };
+}
+
+async function deleteUserFoodUnit(session, unit) {
+  const userId = getSessionUserId(session);
+  if (!userId) throw new Error("사용자 정보를 확인하지 못했어.");
+
+  const unitId = unit?.userUnitId || unit?.user_unit_id;
+  if (!unitId) throw new Error("삭제할 단위 ID를 확인하지 못했어.");
+
+  await requestSupabaseRest(
+    "/user_food_units?user_id=eq." + encodeURIComponent(userId) + "&user_unit_id=eq." + encodeURIComponent(unitId),
+    { method: "DELETE", prefer: "return=minimal" },
+    session?.access_token
+  );
+}
 
 async function fetchUserAppState(session) {
   const userId = getSessionUserId(session);
@@ -1061,6 +1194,101 @@ function getManagedUserAliases(customFoods) {
       return true;
     })
     .sort((a, b) => cleanFoodName(a.name).localeCompare(cleanFoodName(b.name), "ko-KR"));
+}
+
+
+function getFoodTargetIds(food) {
+  if (!food) return { appFoodId: null, userFoodId: null };
+
+  const appFoodId = food.appFoodId || food.app_food_id || (String(food.id || "").startsWith("app-") ? String(food.id).replace("app-", "") : null);
+  const userFoodId = food.userFoodId || food.user_food_id || (String(food.id || "").startsWith("user-") ? String(food.id).replace("user-", "") : null);
+
+  return {
+    appFoodId: appFoodId && /^\d+$/.test(String(appFoodId)) ? Number(appFoodId) : null,
+    userFoodId: userFoodId && /^\d+$/.test(String(userFoodId)) ? Number(userFoodId) : null,
+  };
+}
+
+function isSameFoodTarget(food, ids) {
+  const foodIds = getFoodTargetIds(food);
+  if (ids.appFoodId && foodIds.appFoodId && String(ids.appFoodId) === String(foodIds.appFoodId)) return true;
+  if (ids.userFoodId && foodIds.userFoodId && String(ids.userFoodId) === String(foodIds.userFoodId)) return true;
+  return false;
+}
+
+function getManagedUserUnits(customFoods) {
+  const seen = new Set();
+  const units = [];
+
+  Object.values(customFoods || {}).forEach((food) => {
+    (food?.units || []).forEach((unit) => {
+      if (unit?.source !== "user" && !unit?.userUnitId) return;
+      const key = unit.userUnitId ? "id:" + unit.userUnitId : [getFoodMatchKey(food), normalize(unit.unitName)].join("::");
+      if (!key || seen.has(key)) return;
+      seen.add(key);
+
+      units.push({
+        ...unit,
+        foodName: getFoodDisplayName(food),
+        targetFood: food,
+        targetType: food?.source === "user_food" || food?.userFoodId ? "user_food" : "app_food",
+      });
+    });
+  });
+
+  return units.sort((a, b) => {
+    const foodCompare = cleanFoodName(a.foodName).localeCompare(cleanFoodName(b.foodName), "ko-KR");
+    if (foodCompare !== 0) return foodCompare;
+    return cleanFoodName(a.unitName).localeCompare(cleanFoodName(b.unitName), "ko-KR");
+  });
+}
+
+function getUnitTargetTypeLabel(unit) {
+  return unit?.targetType === "user_food" || unit?.userFoodId ? "직접 등록 음식" : "표준 음식";
+}
+
+function mergeUserFoodUnitIntoMap(currentFoods, targetFood, unitRow) {
+  const unit = toFoodUnitEntry(unitRow, "user");
+  const ids = getFoodTargetIds(targetFood || unit);
+  const nextFoods = { ...currentFoods };
+
+  Object.entries(nextFoods).forEach(([key, food]) => {
+    if (!isSameFoodTarget(food, ids)) return;
+
+    const previousUnits = Array.isArray(food.units) ? food.units : [];
+    const nextUnits = [
+      unit,
+      ...previousUnits.filter((entry) => {
+        if (unit.userUnitId && entry.userUnitId && String(entry.userUnitId) === String(unit.userUnitId)) return false;
+        return !(entry.source === "user" && normalize(entry.unitName) === normalize(unit.unitName));
+      }),
+    ];
+
+    nextFoods[key] = { ...food, units: nextUnits };
+  });
+
+  return nextFoods;
+}
+
+function removeUserFoodUnitFromMap(currentFoods, unitToRemove) {
+  const ids = getFoodTargetIds(unitToRemove?.targetFood || unitToRemove);
+  const unitId = unitToRemove?.userUnitId || unitToRemove?.user_unit_id || null;
+  const unitName = normalize(unitToRemove?.unitName || unitToRemove?.unit_name || "");
+  const nextFoods = { ...currentFoods };
+
+  Object.entries(nextFoods).forEach(([key, food]) => {
+    if (!isSameFoodTarget(food, ids)) return;
+
+    nextFoods[key] = {
+      ...food,
+      units: (food.units || []).filter((entry) => {
+        if (unitId && entry.userUnitId && String(entry.userUnitId) === String(unitId)) return false;
+        return !(entry.source === "user" && unitName && normalize(entry.unitName) === unitName);
+      }),
+    };
+  });
+
+  return nextFoods;
 }
 
 function getAliasTargetTypeLabel(alias) {
@@ -2256,6 +2484,10 @@ export default function App() {
   const [myFoodModalOpen, setMyFoodModalOpen] = useState(false);
   const [myFoodForm, setMyFoodForm] = useState({ name: "", baseAmount: "100", kcal: "", carb: "", protein: "", fat: "" });
   const [myFoodError, setMyFoodError] = useState("");
+  const [myUnitEditTarget, setMyUnitEditTarget] = useState(null);
+  const [myUnitModalOpen, setMyUnitModalOpen] = useState(false);
+  const [myUnitForm, setMyUnitForm] = useState({ unitName: "", grams: "" });
+  const [myUnitError, setMyUnitError] = useState("");
   const [amountTarget, setAmountTarget] = useState(null);
   const [amountInput, setAmountInput] = useState("");
   const [unitAmountTarget, setUnitAmountTarget] = useState(null);
@@ -2628,6 +2860,7 @@ export default function App() {
   const stats = useMemo(() => buildStats(meals, activePlan, morningWeight, dailyRecords, selectedDate), [meals, activePlan, morningWeight, dailyRecords, selectedDate]);
   const managedUserFoods = useMemo(() => getManagedUserFoods(customFoods), [customFoods]);
   const managedUserAliases = useMemo(() => getManagedUserAliases(customFoods), [customFoods]);
+  const managedUserUnits = useMemo(() => getManagedUserUnits(customFoods), [customFoods]);
 
   useEffect(() => {
     if (!authSession || !cloudSyncReady || !HAS_SUPABASE_CONFIG) return;
@@ -3563,6 +3796,80 @@ export default function App() {
     setCustomFoods((current) => removeManagedAliasFromMap(current, alias));
   };
 
+
+
+  const openEditMyUnitModal = (unit) => {
+    setMyUnitEditTarget(unit || null);
+    setMyUnitError("");
+    setMyUnitForm({
+      unitName: cleanFoodName(unit?.unitName || ""),
+      grams: unit?.grams ? formatAmount(toNumber(unit.grams)) : "",
+    });
+    setMyUnitModalOpen(true);
+  };
+
+  const closeMyUnitModal = () => {
+    setMyUnitEditTarget(null);
+    setMyUnitModalOpen(false);
+    setMyUnitError("");
+    setMyUnitForm({ unitName: "", grams: "" });
+  };
+
+  const saveMyUnit = async (event) => {
+    event.preventDefault();
+    setMyUnitError("");
+
+    if (!myUnitEditTarget) return;
+    if (!cleanFoodName(myUnitForm.unitName)) {
+      setMyUnitError("단위명을 입력해줘.");
+      return;
+    }
+    if (toNumber(myUnitForm.grams) <= 0) {
+      setMyUnitError("1단위당 g을 입력해줘.");
+      return;
+    }
+
+    let savedUnit = {
+      ...myUnitEditTarget,
+      unit_name: cleanFoodName(myUnitForm.unitName),
+      unitName: cleanFoodName(myUnitForm.unitName),
+      grams: toNumber(myUnitForm.grams),
+    };
+
+    if (HAS_SUPABASE_CONFIG && authSession && myUnitEditTarget.userUnitId) {
+      try {
+        savedUnit = await updateUserFoodUnit(authSession, myUnitEditTarget, myUnitForm);
+      } catch (error) {
+        setMyUnitError(error.message || "단위 수정에 실패했어.");
+        return;
+      }
+    }
+
+    setCustomFoods((current) => {
+      const removed = removeUserFoodUnitFromMap(current, myUnitEditTarget);
+      return mergeUserFoodUnitIntoMap(removed, myUnitEditTarget.targetFood, savedUnit);
+    });
+    closeMyUnitModal();
+  };
+
+  const removeMyUnit = async (unit) => {
+    if (!unit) return;
+    const unitName = cleanFoodName(unit.unitName || "");
+    const foodName = cleanFoodName(unit.foodName || getFoodDisplayName(unit.targetFood));
+    if (!window.confirm(foodName + " " + unitName + " 단위 설정을 삭제할까?")) return;
+
+    if (HAS_SUPABASE_CONFIG && authSession && unit.userUnitId) {
+      try {
+        await deleteUserFoodUnit(authSession, unit);
+      } catch (error) {
+        setFoodDbError(error.message || "단위 설정 삭제에 실패했어.");
+        return;
+      }
+    }
+
+    setCustomFoods((current) => removeUserFoodUnitFromMap(current, unit));
+  };
+
   const openMemoMatchChoice = (food) => {
     if (!memoPreviewName || !food) return;
     const segmentIndex = getMemoSegmentIndex(activeMemoRow.foods, activeFoodCursor);
@@ -3644,11 +3951,22 @@ export default function App() {
     setUnitAmountInput("");
   };
 
-  const saveUnitAmount = (event) => {
+  const saveUnitAmount = async (event) => {
     event.preventDefault();
     if (!unitAmountTarget?.key) return;
     const nextUnitGrams = toNumber(unitAmountInput);
     if (nextUnitGrams <= 0) return;
+
+    const targetFood = unitAmountTarget.food || findFoodByName(unitAmountTarget.foodName, customFoods);
+
+    if (targetFood && HAS_SUPABASE_CONFIG && authSession) {
+      try {
+        const savedUnit = await upsertUserFoodUnit(authSession, targetFood, unitAmountTarget.unitName, nextUnitGrams);
+        setCustomFoods((current) => mergeUserFoodUnitIntoMap(current, targetFood, savedUnit));
+      } catch (error) {
+        console.warn("개인 단위 저장 실패, 이번 메모에만 반영:", error);
+      }
+    }
 
     const nextOverrides = {
       ...memoUnitOverrides,
@@ -4019,10 +4337,13 @@ export default function App() {
         <MyFoodsScreen
           foods={managedUserFoods}
           aliases={managedUserAliases}
+          units={managedUserUnits}
           onAdd={openNewMyFoodModal}
           onEdit={openEditMyFoodModal}
           onDelete={removeMyFood}
           onDeleteAlias={removeMyAlias}
+          onEditUnit={openEditMyUnitModal}
+          onDeleteUnit={removeMyUnit}
         />
       )}
 
@@ -4110,6 +4431,47 @@ export default function App() {
             </div>
             {myFoodError && <p className="form-error">{myFoodError}</p>}
             <ModalActions onCancel={closeMyFoodModal} submitText={myFoodEditTarget ? "수정" : "추가"} />
+          </form>
+        </Modal>
+      )}
+
+
+
+      {myUnitModalOpen && (
+        <Modal title="단위 설정 수정" onClose={closeMyUnitModal}>
+          <form className="modal-form" onSubmit={saveMyUnit}>
+            <label>
+              <span>음식</span>
+              <input
+                value={cleanFoodName(myUnitEditTarget?.foodName || getFoodDisplayName(myUnitEditTarget?.targetFood))}
+                readOnly
+              />
+            </label>
+            <div className="nutrition-manual-row nutrition-manual-row-two">
+              <label>
+                <span>단위명</span>
+                <input
+                  value={myUnitForm.unitName}
+                  onChange={(event) => setMyUnitForm((current) => ({ ...current, unitName: event.target.value }))}
+                  placeholder="예: 개, 인분, 공기"
+                  lang="ko-KR"
+                  autoCapitalize="off"
+                />
+              </label>
+              <label>
+                <span>1단위(g)</span>
+                <input
+                  value={myUnitForm.grams}
+                  onChange={(event) => setMyUnitForm((current) => ({ ...current, grams: event.target.value }))}
+                  type="number"
+                  min="1"
+                  step="1"
+                  placeholder="예: 120"
+                />
+              </label>
+            </div>
+            {myUnitError && <p className="form-error">{myUnitError}</p>}
+            <ModalActions onCancel={closeMyUnitModal} submitText="수정" />
           </form>
         </Modal>
       )}
@@ -4660,7 +5022,7 @@ function BottomNav({ activeTab, onChange }) {
   );
 }
 
-function MyFoodsScreen({ foods, aliases = [], onAdd, onEdit, onDelete, onDeleteAlias }) {
+function MyFoodsScreen({ foods, aliases = [], units = [], onAdd, onEdit, onDelete, onDeleteAlias, onEditUnit, onDeleteUnit }) {
   const [activeMyFoodTab, setActiveMyFoodTab] = useState("foods");
 
   const tabCopy = {
@@ -4778,10 +5140,31 @@ function MyFoodsScreen({ foods, aliases = [], onAdd, onEdit, onDelete, onDeleteA
       )}
 
       {activeMyFoodTab === "units" && (
-        <div className="empty-state">
-          <strong>단위 설정은 다음 단계에서 연결하면 돼.</strong>
-          <span>예: 바나나 1개 = 120g, 제육 1인분 = 200g</span>
-        </div>
+        units.length === 0 ? (
+          <div className="empty-state">
+            <strong>아직 저장한 단위 설정이 없어.</strong>
+            <span>예: 바나나 1개 입력 후 g을 등록하면 여기에 표시돼.</span>
+          </div>
+        ) : (
+          <div className="my-food-list">
+            {units.map((unit) => (
+              <article className="my-food-card" key={unit.userUnitId || unit.unitId || unit.foodName + unit.unitName}>
+                <div className="my-food-main">
+                  <strong>{unit.foodName}</strong>
+                  <span>{getUnitTargetTypeLabel(unit)}</span>
+                </div>
+                <div className="my-alias-target my-unit-target">
+                  <b>1{unit.unitName}</b>
+                  <span>= {formatAmount(toNumber(unit.grams))}g</span>
+                </div>
+                <div className="my-food-actions">
+                  <button type="button" onClick={() => onEditUnit(unit)}>수정</button>
+                  <button type="button" className="danger-button" onClick={() => onDeleteUnit(unit)}>삭제</button>
+                </div>
+              </article>
+            ))}
+          </div>
+        )
       )}
     </section>
   );
