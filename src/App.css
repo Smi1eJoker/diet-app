@@ -4254,3 +4254,48 @@ textarea,
   user-select: none;
   -webkit-touch-callout: none;
 }
+
+
+/* v19: my foods inner tabs and alias management */
+.my-food-tabs {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.my-food-tabs button {
+  font-size: 12px;
+}
+
+.my-alias-target {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 7px;
+  align-items: start;
+  padding: 9px 10px;
+  border: 1px solid #252525;
+  border-radius: 11px;
+  background: #121212;
+  color: #b8b8b8;
+  font-size: 12px;
+  font-weight: 900;
+  line-height: 1.35;
+}
+
+.my-alias-target b {
+  color: #66e36f;
+  font-weight: 900;
+}
+
+.my-alias-target span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.my-food-actions-single {
+  grid-template-columns: 1fr;
+}
+
+@media (max-width: 360px) {
+  .my-food-tabs button {
+    font-size: 11px;
+  }
+}

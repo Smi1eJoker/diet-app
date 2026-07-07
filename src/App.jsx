@@ -315,8 +315,11 @@ function buildFoodMap(appFoods = [], userAliases = [], userFoods = [], foodSearc
     nextMap[aliasKey] = {
       ...canonical,
       id: "alias-" + (alias.alias_id || aliasKey),
+      aliasId: alias.alias_id || null,
+      aliasText: aliasName,
       name: aliasName,
       canonicalName: canonical.name,
+      aliasTargetSource: alias.user_food_id ? "user_food" : "app_food",
       source: "user_alias",
     };
   });
@@ -419,6 +422,25 @@ async function upsertUserAlias(session, aliasText, food) {
   );
 
   return Array.isArray(rows) && rows[0] ? rows[0] : payload;
+}
+
+async function deleteUserAlias(session, alias) {
+  const userId = getSessionUserId(session);
+  if (!userId) throw new Error("사용자 정보를 확인하지 못했어.");
+
+  const aliasId = alias?.aliasId || (String(alias?.id || "").startsWith("alias-") ? String(alias.id).replace("alias-", "") : "");
+  const aliasText = cleanFoodName(alias?.aliasText || alias?.name || "");
+  const encodedUserId = encodeURIComponent(userId);
+
+  const targetPath = aliasId && /^\d+$/.test(String(aliasId))
+    ? "/user_aliases?user_id=eq." + encodedUserId + "&alias_id=eq." + encodeURIComponent(aliasId)
+    : "/user_aliases?user_id=eq." + encodedUserId + "&alias_text=eq." + encodeURIComponent(aliasText);
+
+  await requestSupabaseRest(
+    targetPath,
+    { method: "DELETE", prefer: "return=minimal" },
+    session?.access_token
+  );
 }
 
 async function updateUserFood(session, userFoodId, food) {
@@ -924,8 +946,23 @@ function getManagedUserFoods(customFoods) {
   return Object.values(customFoods || {})
     .filter((food) => {
       if (!food) return false;
-      if (food.source === "user_alias") return false;
+
+      // alias가 같은 이름의 user_food를 덮어쓴 경우에도 직접 등록 음식 탭에서 최소 1번은 보이게 한다.
+      if (food.source === "user_alias") {
+        return Boolean(food.userFoodId) && normalize(food.name) === normalize(food.canonicalName || food.name);
+      }
+
       return food.source === "user_food" || Boolean(food.userFoodId) || String(food.id || "").startsWith("custom-");
+    })
+    .map((food) => {
+      if (food.source !== "user_alias") return food;
+      return {
+        ...food,
+        id: "user-" + (food.userFoodId || normalize(food.canonicalName || food.name)),
+        name: food.canonicalName || food.name,
+        canonicalName: "",
+        source: "user_food",
+      };
     })
     .filter((food) => {
       const key = food.userFoodId ? "id:" + food.userFoodId : "name:" + normalize(food.name);
@@ -934,6 +971,49 @@ function getManagedUserFoods(customFoods) {
       return true;
     })
     .sort((a, b) => getFoodDisplayName(a).localeCompare(getFoodDisplayName(b), "ko-KR"));
+}
+
+function getManagedUserAliases(customFoods) {
+  const seen = new Set();
+
+  return Object.values(customFoods || {})
+    .filter((food) => food?.source === "user_alias")
+    .filter((alias) => {
+      const key = alias.aliasId ? "id:" + alias.aliasId : "name:" + normalize(alias.name);
+      if (!key || seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    })
+    .sort((a, b) => cleanFoodName(a.name).localeCompare(cleanFoodName(b.name), "ko-KR"));
+}
+
+function getAliasTargetTypeLabel(alias) {
+  return alias?.userFoodId || alias?.aliasTargetSource === "user_food" ? "직접 등록 음식" : "표준 음식";
+}
+
+function removeManagedAliasFromMap(currentFoods, aliasToRemove) {
+  const nextFoods = { ...currentFoods };
+  const aliasKey = normalize(aliasToRemove?.aliasText || aliasToRemove?.name || "");
+
+  if (aliasKey) delete nextFoods[aliasKey];
+
+  // 같은 이름 alias가 user_food를 덮어쓴 상태였다면, 별칭 삭제 후에도 직접 등록 음식은 남겨둔다.
+  if (aliasToRemove?.userFoodId) {
+    const restoredName = cleanFoodName(aliasToRemove.canonicalName || aliasToRemove.name || "");
+    const restoredKey = normalize(restoredName);
+
+    if (restoredKey && !nextFoods[restoredKey]) {
+      nextFoods[restoredKey] = {
+        ...aliasToRemove,
+        id: "user-" + aliasToRemove.userFoodId,
+        name: restoredName,
+        canonicalName: "",
+        source: "user_food",
+      };
+    }
+  }
+
+  return nextFoods;
 }
 
 function makeUserFoodFormFromFood(food) {
@@ -2457,6 +2537,7 @@ export default function App() {
   const totals = useMemo(() => calculateTotals(meals), [meals]);
   const stats = useMemo(() => buildStats(meals, activePlan, morningWeight, dailyRecords, selectedDate), [meals, activePlan, morningWeight, dailyRecords, selectedDate]);
   const managedUserFoods = useMemo(() => getManagedUserFoods(customFoods), [customFoods]);
+  const managedUserAliases = useMemo(() => getManagedUserAliases(customFoods), [customFoods]);
 
   useEffect(() => {
     if (!authSession || !cloudSyncReady || !HAS_SUPABASE_CONFIG) return;
@@ -3382,6 +3463,23 @@ export default function App() {
     setCustomFoods((current) => removeManagedUserFoodFromMap(current, food));
   };
 
+  const removeMyAlias = async (alias) => {
+    if (!alias) return;
+    const aliasName = cleanFoodName(alias.aliasText || alias.name || "");
+    if (!window.confirm(aliasName + " 음식 연결을 삭제할까?")) return;
+
+    if (HAS_SUPABASE_CONFIG && authSession) {
+      try {
+        await deleteUserAlias(authSession, alias);
+      } catch (error) {
+        setFoodDbError(error.message || "음식 연결 삭제에 실패했어.");
+        return;
+      }
+    }
+
+    setCustomFoods((current) => removeManagedAliasFromMap(current, alias));
+  };
+
   const openMemoMatchChoice = (food) => {
     if (!memoPreviewName || !food) return;
     const segmentIndex = getMemoSegmentIndex(activeMemoRow.foods, activeFoodCursor);
@@ -3827,9 +3925,11 @@ export default function App() {
       {activeTab === "foods" && (
         <MyFoodsScreen
           foods={managedUserFoods}
+          aliases={managedUserAliases}
           onAdd={openNewMyFoodModal}
           onEdit={openEditMyFoodModal}
           onDelete={removeMyFood}
+          onDeleteAlias={removeMyAlias}
         />
       )}
 
@@ -4467,40 +4567,127 @@ function BottomNav({ activeTab, onChange }) {
   );
 }
 
-function MyFoodsScreen({ foods, onAdd, onEdit, onDelete }) {
+function MyFoodsScreen({ foods, aliases = [], onAdd, onEdit, onDelete, onDeleteAlias }) {
+  const [activeMyFoodTab, setActiveMyFoodTab] = useState("foods");
+
+  const tabCopy = {
+    foods: {
+      kicker: "개인 음식 DB",
+      title: "직접 등록",
+      description: "직접 등록한 음식은 다음 메모 입력부터 자동 계산돼.",
+    },
+    aliases: {
+      kicker: "개인 연결 규칙",
+      title: "음식 연결",
+      description: "내가 입력하는 이름과 실제 계산 음식을 관리해.",
+    },
+    units: {
+      kicker: "개인 단위 설정",
+      title: "단위 설정",
+      description: "개/인분/공기 같은 단위별 g 설정을 관리해.",
+    },
+  }[activeMyFoodTab];
+
   return (
     <section className="my-foods-screen" aria-label="나의 음식">
       <div className="my-foods-head">
         <div>
-          <span>개인 음식 DB</span>
+          <span>{tabCopy.kicker}</span>
           <strong>나의 음식</strong>
-          <p>직접 등록한 음식은 다음 메모 입력부터 자동 계산돼.</p>
+          <p>{tabCopy.description}</p>
         </div>
-        <button type="button" className="primary-button" onClick={onAdd}>추가</button>
+        {activeMyFoodTab === "foods" && (
+          <button type="button" className="primary-button" onClick={onAdd}>추가</button>
+        )}
       </div>
 
-      {foods.length === 0 ? (
+      <div className="segmented-control my-food-tabs" role="tablist" aria-label="나의 음식 관리 탭">
+        <button
+          type="button"
+          className={activeMyFoodTab === "foods" ? "is-selected" : ""}
+          onClick={() => setActiveMyFoodTab("foods")}
+        >
+          직접 등록
+        </button>
+        <button
+          type="button"
+          className={activeMyFoodTab === "aliases" ? "is-selected" : ""}
+          onClick={() => setActiveMyFoodTab("aliases")}
+        >
+          음식 연결
+        </button>
+        <button
+          type="button"
+          className={activeMyFoodTab === "units" ? "is-selected" : ""}
+          onClick={() => setActiveMyFoodTab("units")}
+        >
+          단위 설정
+        </button>
+      </div>
+
+      {activeMyFoodTab === "foods" && (
+        foods.length === 0 ? (
+          <div className="empty-state">
+            <strong>아직 저장한 음식이 없어.</strong>
+            <span>식단 카드의 음식 연결/등록에서 추가하거나 여기서 직접 추가해.</span>
+          </div>
+        ) : (
+          <div className="my-food-list">
+            {foods.map((food) => (
+              <article className="my-food-card" key={food.userFoodId || food.id || food.name}>
+                <div className="my-food-main">
+                  <strong>{getFoodDisplayName(food)}</strong>
+                  <span>100g {Math.round(food.kcal)}kcal</span>
+                </div>
+                <div className="my-food-macros">
+                  C {formatMacro(food.carb)}g · P {formatMacro(food.protein)}g · F {formatMacro(food.fat)}g
+                </div>
+                <div className="my-food-actions">
+                  <button type="button" onClick={() => onEdit(food)}>수정</button>
+                  <button type="button" className="danger-button" onClick={() => onDelete(food)}>삭제</button>
+                </div>
+              </article>
+            ))}
+          </div>
+        )
+      )}
+
+      {activeMyFoodTab === "aliases" && (
+        aliases.length === 0 ? (
+          <div className="empty-state">
+            <strong>아직 저장한 음식 연결이 없어.</strong>
+            <span>후보창에서 앞으로도 사용을 누르면 여기에 표시돼.</span>
+          </div>
+        ) : (
+          <div className="my-food-list">
+            {aliases.map((alias) => {
+              const aliasName = cleanFoodName(alias.aliasText || alias.name || "");
+              const targetName = cleanFoodName(alias.canonicalName || getFoodDisplayName(alias));
+
+              return (
+                <article className="my-food-card" key={alias.aliasId || alias.id || aliasName}>
+                  <div className="my-food-main">
+                    <strong>{aliasName}</strong>
+                    <span>{getAliasTargetTypeLabel(alias)}</span>
+                  </div>
+                  <div className="my-alias-target">
+                    <b>→</b>
+                    <span>{targetName}</span>
+                  </div>
+                  <div className="my-food-actions my-food-actions-single">
+                    <button type="button" className="danger-button" onClick={() => onDeleteAlias(alias)}>연결 삭제</button>
+                  </div>
+                </article>
+              );
+            })}
+          </div>
+        )
+      )}
+
+      {activeMyFoodTab === "units" && (
         <div className="empty-state">
-          <strong>아직 저장한 음식이 없어.</strong>
-          <span>식단 카드의 음식 연결/등록에서 추가하거나 여기서 직접 추가해.</span>
-        </div>
-      ) : (
-        <div className="my-food-list">
-          {foods.map((food) => (
-            <article className="my-food-card" key={food.userFoodId || food.id || food.name}>
-              <div className="my-food-main">
-                <strong>{getFoodDisplayName(food)}</strong>
-                <span>100g {Math.round(food.kcal)}kcal</span>
-              </div>
-              <div className="my-food-macros">
-                C {formatMacro(food.carb)}g · P {formatMacro(food.protein)}g · F {formatMacro(food.fat)}g
-              </div>
-              <div className="my-food-actions">
-                <button type="button" onClick={() => onEdit(food)}>수정</button>
-                <button type="button" className="danger-button" onClick={() => onDelete(food)}>삭제</button>
-              </div>
-            </article>
-          ))}
+          <strong>단위 설정은 다음 단계에서 연결하면 돼.</strong>
+          <span>예: 바나나 1개 = 120g, 제육 1인분 = 200g</span>
         </div>
       )}
     </section>
