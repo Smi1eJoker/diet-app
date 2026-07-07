@@ -4466,3 +4466,85 @@ textarea,
     font-size: 10.5px;
   }
 }
+
+/* v18: shared candidate row layout for food connect/register and alias edit modals */
+.alias-candidate-list button {
+  min-height: 58px !important;
+  display: grid !important;
+  grid-template-columns: minmax(0, 1fr) auto !important;
+  align-items: center !important;
+  gap: 10px !important;
+  padding: 10px 12px !important;
+  overflow: hidden !important;
+}
+
+.alias-candidate-list button > em {
+  display: none !important;
+}
+
+.candidate-food-name {
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+  align-content: center;
+}
+
+.alias-candidate-list button .candidate-food-name strong {
+  min-width: 0;
+  color: #f5f5f5;
+  font-size: 14px;
+  font-weight: 900;
+  line-height: 1.15;
+  word-break: keep-all;
+  overflow-wrap: anywhere;
+}
+
+.alias-candidate-list button .candidate-food-name small {
+  color: #f5f5f5;
+  font-size: 12px;
+  font-weight: 900;
+  line-height: 1.15;
+  word-break: keep-all;
+  overflow-wrap: anywhere;
+}
+
+.candidate-food-nutrients {
+  min-width: 146px;
+  display: grid;
+  gap: 2px;
+  justify-items: end;
+  text-align: right;
+}
+
+.alias-candidate-list button .candidate-food-nutrients span {
+  color: #b8b8b8;
+  font-size: 11px;
+  font-weight: 900;
+  line-height: 1.2;
+  white-space: nowrap;
+}
+
+.alias-candidate-list button .candidate-food-nutrients span:first-child {
+  color: #f5f5f5;
+}
+
+.alias-candidate-list button.is-current-basis .candidate-food-name strong,
+.alias-candidate-list button.is-current-basis .candidate-food-name small {
+  color: #66e36f;
+}
+
+@media (max-width: 360px) {
+  .alias-candidate-list button {
+    grid-template-columns: minmax(0, 1fr) minmax(132px, auto) !important;
+    gap: 8px !important;
+    padding: 9px 10px !important;
+  }
+
+  .candidate-food-nutrients {
+    min-width: 132px;
+  }
+
+  .alias-candidate-list button .candidate-food-nutrients span {
+    font-size: 10.5px;
+  }
+}

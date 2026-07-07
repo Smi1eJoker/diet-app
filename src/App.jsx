@@ -1027,6 +1027,25 @@ function splitMemoPreviewFoodName(value) {
   };
 }
 
+function CandidateFoodRowContent({ food }) {
+  const displayName = getFoodDisplayName(food);
+  const nameParts = splitMemoPreviewFoodName(displayName);
+
+  return (
+    <>
+      <div className="candidate-food-name">
+        <strong>{nameParts.main}</strong>
+        {nameParts.sub && <small>{nameParts.sub}</small>}
+      </div>
+
+      <div className="candidate-food-nutrients">
+        <span>100g {formatAmount(toNumber(food.kcal))}kcal</span>
+        <span>C {formatMacro(food.carb)}g · P {formatMacro(food.protein)}g · F {formatMacro(food.fat)}g</span>
+      </div>
+    </>
+  );
+}
+
 function clamp(value, min, max) {
   return Math.min(max, Math.max(min, value));
 }
@@ -4585,12 +4604,7 @@ export default function App() {
                       className={food.isCurrentBasis ? "is-current-basis" : ""}
                       onClick={() => openNutritionMatchChoice(food)}
                     >
-                      <strong>{getFoodDisplayName(food)}</strong>
-                      <em>100g</em>
-                      <span>
-                        <b>{Math.round(food.kcal)}kcal</b>
-                        <small>C {formatMacro(food.carb)}g P {formatMacro(food.protein)}g F {formatMacro(food.fat)}g</small>
-                      </span>
+                      <CandidateFoodRowContent food={food} />
                     </button>
                   ))}
                 </div>
@@ -4743,10 +4757,7 @@ export default function App() {
                     className={food.isCurrentBasis ? "is-current-basis" : ""}
                     onClick={() => applyAliasEditFood(food)}
                   >
-                    <strong>{getFoodDisplayName(food)}</strong>
-                    <span>
-                      100g {formatAmount(toNumber(food.kcal))}kcal · Carb {formatMacro(food.carb)}g · Pro {formatMacro(food.protein)}g · Fat {formatMacro(food.fat)}g
-                    </span>
+                    <CandidateFoodRowContent food={food} />
                   </button>
                 ))}
               </div>
