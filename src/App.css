@@ -3538,7 +3538,6 @@ input[type="number"]::-webkit-inner-spin-button {
   color: #66e36f;
 }
 
-/* v7: saved alias candidate highlight in memo DB preview */
 .memo-db-preview button.is-saved-alias-basis,
 .memo-preview-row.is-saved-alias-basis {
   border-color: #66e36f;
