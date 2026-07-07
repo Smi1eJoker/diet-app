@@ -4393,31 +4393,46 @@ textarea,
   }
 }
 
-/* v19: 음식 연결 탭 간결 표시 + 길게 눌러 관리 */
-.my-alias-card {
+
+/* v19: 나의 음식 카드 버튼 제거, 길게 눌러 수정/삭제 */
+.my-food-longpress-card {
   cursor: pointer;
-  gap: 0;
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
+}
+
+.my-food-longpress-card:active {
+  border-color: #4a4a4a;
+  background: #1d1d1d;
+}
+
+.action-sheet-title {
+  display: block;
+  padding: 8px 10px 4px;
+  color: #f5f5f5;
+  font-size: 14px;
+  font-weight: 900;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
 }
 
 .my-alias-line {
-  min-width: 0;
   display: flex;
   align-items: baseline;
   gap: 6px;
-  color: #f5f5f5;
-  font-weight: 900;
+  min-width: 0;
   line-height: 1.35;
 }
 
 .my-alias-line strong {
-  flex: 0 0 auto;
   color: #f5f5f5;
   font-size: 15px;
   font-weight: 900;
+  overflow-wrap: anywhere;
 }
 
-.my-alias-line span {
-  flex: 0 0 auto;
+.my-alias-line > span {
   color: #8f8f8f;
   font-size: 13px;
   font-weight: 900;
@@ -4425,7 +4440,7 @@ textarea,
 
 .my-alias-line em {
   min-width: 0;
-  color: #f5f5f5;
+  color: #d8d8d8;
   font-style: normal;
   font-size: 14px;
   font-weight: 900;
@@ -4433,20 +4448,23 @@ textarea,
 }
 
 .my-alias-line small {
-  margin-left: 4px;
+  margin-left: 3px;
   color: #8f8f8f;
   font-size: 11px;
   font-weight: 900;
-  white-space: nowrap;
 }
 
-.alias-edit-panel {
-  display: grid;
-  gap: 10px;
+.my-unit-card {
+  min-height: 48px;
+  align-content: center;
 }
 
-.alias-edit-summary {
-  margin-bottom: 0;
+.my-unit-line {
+  color: #f5f5f5;
+  font-size: 14px;
+  font-weight: 900;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
 }
 
 @media (max-width: 360px) {
@@ -4454,97 +4472,13 @@ textarea,
     gap: 5px;
   }
 
-  .my-alias-line strong {
-    font-size: 14px;
-  }
-
-  .my-alias-line em {
+  .my-alias-line strong,
+  .my-alias-line em,
+  .my-unit-line {
     font-size: 13px;
   }
 
   .my-alias-line small {
-    font-size: 10.5px;
-  }
-}
-
-/* v18: shared candidate row layout for food connect/register and alias edit modals */
-.alias-candidate-list button {
-  min-height: 58px !important;
-  display: grid !important;
-  grid-template-columns: minmax(0, 1fr) auto !important;
-  align-items: center !important;
-  gap: 10px !important;
-  padding: 10px 12px !important;
-  overflow: hidden !important;
-}
-
-.alias-candidate-list button > em {
-  display: none !important;
-}
-
-.candidate-food-name {
-  min-width: 0;
-  display: grid;
-  gap: 2px;
-  align-content: center;
-}
-
-.alias-candidate-list button .candidate-food-name strong {
-  min-width: 0;
-  color: #f5f5f5;
-  font-size: 14px;
-  font-weight: 900;
-  line-height: 1.15;
-  word-break: keep-all;
-  overflow-wrap: anywhere;
-}
-
-.alias-candidate-list button .candidate-food-name small {
-  color: #f5f5f5;
-  font-size: 12px;
-  font-weight: 900;
-  line-height: 1.15;
-  word-break: keep-all;
-  overflow-wrap: anywhere;
-}
-
-.candidate-food-nutrients {
-  min-width: 146px;
-  display: grid;
-  gap: 2px;
-  justify-items: end;
-  text-align: right;
-}
-
-.alias-candidate-list button .candidate-food-nutrients span {
-  color: #b8b8b8;
-  font-size: 11px;
-  font-weight: 900;
-  line-height: 1.2;
-  white-space: nowrap;
-}
-
-.alias-candidate-list button .candidate-food-nutrients span:first-child {
-  color: #f5f5f5;
-}
-
-.alias-candidate-list button.is-current-basis .candidate-food-name strong,
-.alias-candidate-list button.is-current-basis .candidate-food-name small {
-  color: #66e36f;
-}
-
-@media (max-width: 360px) {
-  .alias-candidate-list button {
-    grid-template-columns: minmax(0, 1fr) minmax(132px, auto) !important;
-    gap: 8px !important;
-    padding: 9px 10px !important;
-  }
-
-  .candidate-food-nutrients {
-    min-width: 132px;
-  }
-
-  .alias-candidate-list button .candidate-food-nutrients span {
     font-size: 10.5px;
   }
 }

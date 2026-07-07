@@ -1027,25 +1027,6 @@ function splitMemoPreviewFoodName(value) {
   };
 }
 
-function CandidateFoodRowContent({ food }) {
-  const displayName = getFoodDisplayName(food);
-  const nameParts = splitMemoPreviewFoodName(displayName);
-
-  return (
-    <>
-      <div className="candidate-food-name">
-        <strong>{nameParts.main}</strong>
-        {nameParts.sub && <small>{nameParts.sub}</small>}
-      </div>
-
-      <div className="candidate-food-nutrients">
-        <span>100g {formatAmount(toNumber(food.kcal))}kcal</span>
-        <span>C {formatMacro(food.carb)}g · P {formatMacro(food.protein)}g · F {formatMacro(food.fat)}g</span>
-      </div>
-    </>
-  );
-}
-
 function clamp(value, min, max) {
   return Math.min(max, Math.max(min, value));
 }
@@ -1235,27 +1216,53 @@ function isSameFoodTarget(food, ids) {
   return false;
 }
 
+function getUnitDisplayFoodName(food) {
+  const aliasName = cleanFoodName(food?.aliasText || food?.name || "");
+  const targetName = cleanFoodName(food?.canonicalName || getFoodDisplayName(food));
+
+  if (food?.source === "user_alias" && aliasName && targetName && normalize(aliasName) !== normalize(targetName)) {
+    return aliasName + "(" + targetName + ")";
+  }
+
+  return targetName || aliasName;
+}
+
+function getUnitDisplayPriority(food) {
+  if (food?.source === "user_alias") return 3;
+  if (food?.source === "user_food" || food?.userFoodId) return 2;
+  return 1;
+}
+
 function getManagedUserUnits(customFoods) {
-  const seen = new Set();
-  const units = [];
+  const unitsByKey = new Map();
 
   Object.values(customFoods || {}).forEach((food) => {
     (food?.units || []).forEach((unit) => {
       if (unit?.source !== "user" && !unit?.userUnitId) return;
-      const key = unit.userUnitId ? "id:" + unit.userUnitId : [getFoodMatchKey(food), normalize(unit.unitName)].join("::");
-      if (!key || seen.has(key)) return;
-      seen.add(key);
 
-      units.push({
+      const targetIds = getFoodTargetIds(food);
+      const key = unit.userUnitId
+        ? "id:" + unit.userUnitId
+        : [targetIds.appFoodId || "", targetIds.userFoodId || "", normalize(unit.unitName)].join("::");
+
+      if (!key) return;
+
+      const candidate = {
         ...unit,
-        foodName: getFoodDisplayName(food),
+        foodName: getUnitDisplayFoodName(food),
         targetFood: food,
         targetType: food?.source === "user_food" || food?.userFoodId ? "user_food" : "app_food",
-      });
+        displayPriority: getUnitDisplayPriority(food),
+      };
+
+      const previous = unitsByKey.get(key);
+      if (!previous || candidate.displayPriority > previous.displayPriority) {
+        unitsByKey.set(key, candidate);
+      }
     });
   });
 
-  return units.sort((a, b) => {
+  return Array.from(unitsByKey.values()).sort((a, b) => {
     const foodCompare = cleanFoodName(a.foodName).localeCompare(cleanFoodName(b.foodName), "ko-KR");
     if (foodCompare !== 0) return foodCompare;
     return cleanFoodName(a.unitName).localeCompare(cleanFoodName(b.unitName), "ko-KR");
@@ -2507,8 +2514,6 @@ export default function App() {
   const [myUnitModalOpen, setMyUnitModalOpen] = useState(false);
   const [myUnitForm, setMyUnitForm] = useState({ unitName: "", grams: "" });
   const [myUnitError, setMyUnitError] = useState("");
-  const [aliasEditTarget, setAliasEditTarget] = useState(null);
-  const [aliasEditError, setAliasEditError] = useState("");
   const [amountTarget, setAmountTarget] = useState(null);
   const [amountInput, setAmountInput] = useState("");
   const [unitAmountTarget, setUnitAmountTarget] = useState(null);
@@ -3817,35 +3822,6 @@ export default function App() {
     setCustomFoods((current) => removeManagedAliasFromMap(current, alias));
   };
 
-  const openAliasActionSheet = (alias) => {
-    if (!alias) return;
-    setActionTarget({ type: "alias", alias });
-  };
-
-  const openEditAliasModal = (alias) => {
-    if (!alias) return;
-    setActionTarget(null);
-    setAliasEditError("");
-    setAliasEditTarget(alias);
-  };
-
-  const closeAliasEditModal = () => {
-    setAliasEditTarget(null);
-    setAliasEditError("");
-  };
-
-  const applyAliasEditFood = async (food) => {
-    if (!aliasEditTarget || !food) return;
-    const aliasName = cleanFoodName(aliasEditTarget.aliasText || aliasEditTarget.name || "");
-
-    try {
-      await connectAliasToFood(aliasName, food);
-      closeAliasEditModal();
-    } catch (error) {
-      setAliasEditError(error.message || "음식 연결 수정에 실패했어.");
-    }
-  };
-
 
 
   const openEditMyUnitModal = (unit) => {
@@ -4122,25 +4098,6 @@ export default function App() {
     }
   };
 
-  const aliasEditCandidateFoods = useMemo(() => {
-    if (!aliasEditTarget) return [];
-
-    const aliasName = cleanFoodName(aliasEditTarget.aliasText || aliasEditTarget.name || "");
-    const matches = findFoodMatchesExpanded(aliasName, customFoods)
-      .filter((food) => food?.source !== "user_alias" || normalize(food.name) === normalize(aliasName));
-    const currentFood = aliasEditTarget
-      ? {
-          ...aliasEditTarget,
-          matchScore: -1,
-          matchWeight: 999,
-          isCurrentBasis: true,
-          displayName: getFoodDisplayName(aliasEditTarget),
-        }
-      : null;
-
-    return currentFood ? dedupeFoodMatches([currentFood, ...matches]) : matches;
-  }, [aliasEditTarget, customFoods]);
-
   const nutritionCandidateFoods = useMemo(() => {
     if (!nutritionTarget) return [];
 
@@ -4411,7 +4368,6 @@ export default function App() {
           onEdit={openEditMyFoodModal}
           onDelete={removeMyFood}
           onDeleteAlias={removeMyAlias}
-          onAliasLongPress={openAliasActionSheet}
           onEditUnit={openEditMyUnitModal}
           onDeleteUnit={removeMyUnit}
         />
@@ -4604,7 +4560,12 @@ export default function App() {
                       className={food.isCurrentBasis ? "is-current-basis" : ""}
                       onClick={() => openNutritionMatchChoice(food)}
                     >
-                      <CandidateFoodRowContent food={food} />
+                      <strong>{getFoodDisplayName(food)}</strong>
+                      <em>100g</em>
+                      <span>
+                        <b>{Math.round(food.kcal)}kcal</b>
+                        <small>C {formatMacro(food.carb)}g P {formatMacro(food.protein)}g F {formatMacro(food.fat)}g</small>
+                      </span>
                     </button>
                   ))}
                 </div>
@@ -4738,98 +4699,44 @@ export default function App() {
         </div>
       )}
 
-      {aliasEditTarget && (
-        <Modal title="음식 연결 수정" onClose={closeAliasEditModal}>
-          <div className="alias-candidate-panel alias-edit-panel">
-            <div className="match-choice-summary alias-edit-summary">
-              <strong>{cleanFoodName(aliasEditTarget.aliasText || aliasEditTarget.name || "")}</strong>
-              <span>연결할 음식을 다시 선택해.</span>
-            </div>
-
-            {aliasEditCandidateFoods.length === 0 ? (
-              <p className="modal-hint">연결할 후보가 없어. 기록 탭에서 음식 연결/등록으로 다시 연결해줘.</p>
-            ) : (
-              <div className="alias-candidate-list">
-                {aliasEditCandidateFoods.map((food) => (
-                  <button
-                    key={food.id || getFoodDisplayName(food)}
-                    type="button"
-                    className={food.isCurrentBasis ? "is-current-basis" : ""}
-                    onClick={() => applyAliasEditFood(food)}
-                  >
-                    <CandidateFoodRowContent food={food} />
-                  </button>
-                ))}
-              </div>
-            )}
-
-            {aliasEditError && <p className="form-error">{aliasEditError}</p>}
-          </div>
-        </Modal>
-      )}
-
       {actionTarget && (
         <div className="sheet-backdrop" role="presentation" onClick={() => setActionTarget(null)}>
           <div className="action-sheet" role="dialog" aria-modal="true" onClick={(event) => event.stopPropagation()}>
-            {actionTarget.type === "alias" ? (
-              <>
-                <div className="match-choice-summary">
-                  <strong>{cleanFoodName(actionTarget.alias?.aliasText || actionTarget.alias?.name || "")}</strong>
-                  <span>→ {getFoodDisplayName(actionTarget.alias)} 연결</span>
-                </div>
-                <button type="button" onClick={() => openEditAliasModal(actionTarget.alias)}>연결 음식 수정</button>
-                <button
-                  type="button"
-                  className="danger-button"
-                  onClick={() => {
-                    const alias = actionTarget.alias;
-                    setActionTarget(null);
-                    removeMyAlias(alias);
-                  }}
-                >
-                  연결 삭제
-                </button>
-                <button type="button" className="ghost-button" onClick={() => setActionTarget(null)}>취소</button>
-              </>
-            ) : (
-              <>
-                {actionTarget.type === "food" && (
-                  <button
-                    type="button"
-                    onClick={() => openFoodBasisModal(actionTarget.mealId, actionTarget.foodId)}
-                  >
-                    기준 음식 수정
-                  </button>
-                )}
-                <button
-                  type="button"
-                  onClick={() => {
-                    if (actionTarget.type === "meal") startEditMeal(actionTarget.mealId);
-                    if (actionTarget.type === "food") startEditFood(actionTarget.mealId, actionTarget.foodId);
-                    if (actionTarget.type === "weight") editMorningWeight();
-                    if (actionTarget.type === "day") editCompletedDay();
-                  }}
-                >
-                  수정하기
-                </button>
-                {actionTarget.type !== "day" && (
-                  <button
-                    type="button"
-                    className="danger-button"
-                    onClick={() => {
-                      if (actionTarget.type === "meal") deleteMeal(actionTarget.mealId);
-                      if (actionTarget.type === "food") deleteFood(actionTarget.mealId, actionTarget.foodId);
-                      if (actionTarget.type === "weight") deleteMorningWeight();
-                    }}
-                  >
-                    삭제하기
-                  </button>
-                )}
-                <button type="button" className="ghost-button" onClick={() => setActionTarget(null)}>
-                  취소
-                </button>
-              </>
+            {actionTarget.type === "food" && (
+              <button
+                type="button"
+                onClick={() => openFoodBasisModal(actionTarget.mealId, actionTarget.foodId)}
+              >
+                기준 음식 수정
+              </button>
             )}
+            <button
+              type="button"
+              onClick={() => {
+                if (actionTarget.type === "meal") startEditMeal(actionTarget.mealId);
+                if (actionTarget.type === "food") startEditFood(actionTarget.mealId, actionTarget.foodId);
+                if (actionTarget.type === "weight") editMorningWeight();
+                if (actionTarget.type === "day") editCompletedDay();
+              }}
+            >
+              수정하기
+            </button>
+            {actionTarget.type !== "day" && (
+              <button
+                type="button"
+                className="danger-button"
+                onClick={() => {
+                  if (actionTarget.type === "meal") deleteMeal(actionTarget.mealId);
+                  if (actionTarget.type === "food") deleteFood(actionTarget.mealId, actionTarget.foodId);
+                  if (actionTarget.type === "weight") deleteMorningWeight();
+                }}
+              >
+                삭제하기
+              </button>
+            )}
+            <button type="button" className="ghost-button" onClick={() => setActionTarget(null)}>
+              취소
+            </button>
           </div>
         </div>
       )}
@@ -5141,28 +5048,137 @@ function BottomNav({ activeTab, onChange }) {
   );
 }
 
-function AliasConnectionCard({ alias, onLongPress }) {
-  const aliasName = cleanFoodName(alias.aliasText || alias.name || "");
-  const targetName = cleanFoodName(alias.canonicalName || getFoodDisplayName(alias));
-  const typeLabel = getAliasTargetTypeLabel(alias);
-  const longPressProps = useLongPress(() => onLongPress?.(alias));
-
+function InlineActionSheet({ title, editLabel = "수정하기", deleteLabel = "삭제하기", onEdit, onDelete, onClose }) {
   return (
-    <article
-      className="my-food-card my-alias-card"
-      aria-label={aliasName + " 음식 연결"}
-      {...longPressProps}
-    >
-      <div className="my-alias-line">
-        <strong>{aliasName}</strong>
-        <span aria-hidden="true">-</span>
-        <em>{targetName}<small>({typeLabel})</small></em>
+    <div className="sheet-backdrop" role="presentation" onClick={onClose}>
+      <div className="action-sheet" role="dialog" aria-modal="true" onClick={(event) => event.stopPropagation()}>
+        {title && <strong className="action-sheet-title">{title}</strong>}
+        {onEdit && <button type="button" onClick={onEdit}>{editLabel}</button>}
+        {onDelete && <button type="button" className="danger-button" onClick={onDelete}>{deleteLabel}</button>}
+        <button type="button" className="ghost-button" onClick={onClose}>취소</button>
       </div>
-    </article>
+    </div>
   );
 }
 
-function MyFoodsScreen({ foods, aliases = [], units = [], onAdd, onEdit, onDelete, onDeleteAlias, onAliasLongPress, onEditUnit, onDeleteUnit }) {
+function ManagedFoodCard({ food, onEdit, onDelete }) {
+  const [isActionOpen, setIsActionOpen] = useState(false);
+  const foodName = getFoodDisplayName(food);
+  const longPressProps = useLongPress(() => setIsActionOpen(true));
+
+  return (
+    <>
+      <article
+        className="my-food-card my-food-longpress-card"
+        aria-label={foodName + " 직접 등록 음식"}
+        title="길게 눌러 수정/삭제"
+        {...longPressProps}
+      >
+        <div className="my-food-main">
+          <strong>{foodName}</strong>
+          <span>100g {Math.round(food.kcal)}kcal</span>
+        </div>
+        <div className="my-food-macros">
+          C {formatMacro(food.carb)}g · P {formatMacro(food.protein)}g · F {formatMacro(food.fat)}g
+        </div>
+      </article>
+
+      {isActionOpen && (
+        <InlineActionSheet
+          title={foodName}
+          editLabel="음식 수정"
+          deleteLabel="음식 삭제"
+          onEdit={() => {
+            setIsActionOpen(false);
+            onEdit(food);
+          }}
+          onDelete={() => {
+            setIsActionOpen(false);
+            onDelete(food);
+          }}
+          onClose={() => setIsActionOpen(false)}
+        />
+      )}
+    </>
+  );
+}
+
+function AliasConnectionCard({ alias, onDeleteAlias }) {
+  const [isActionOpen, setIsActionOpen] = useState(false);
+  const aliasName = cleanFoodName(alias.aliasText || alias.name || "");
+  const targetName = cleanFoodName(alias.canonicalName || getFoodDisplayName(alias));
+  const typeLabel = getAliasTargetTypeLabel(alias);
+  const longPressProps = useLongPress(() => setIsActionOpen(true));
+
+  return (
+    <>
+      <article
+        className="my-food-card my-alias-card my-food-longpress-card"
+        aria-label={aliasName + " 음식 연결"}
+        title="길게 눌러 수정/삭제"
+        {...longPressProps}
+      >
+        <div className="my-alias-line">
+          <strong>{aliasName}</strong>
+          <span aria-hidden="true">-</span>
+          <em>{targetName}<small>({typeLabel})</small></em>
+        </div>
+      </article>
+
+      {isActionOpen && (
+        <InlineActionSheet
+          title={aliasName + " - " + targetName}
+          deleteLabel="연결 삭제"
+          onDelete={() => {
+            setIsActionOpen(false);
+            onDeleteAlias(alias);
+          }}
+          onClose={() => setIsActionOpen(false)}
+        />
+      )}
+    </>
+  );
+}
+
+function UnitSettingCard({ unit, onEdit, onDelete }) {
+  const [isActionOpen, setIsActionOpen] = useState(false);
+  const unitText = cleanFoodName(unit.unitName || "");
+  const foodName = cleanFoodName(unit.foodName || getFoodDisplayName(unit.targetFood));
+  const lineText = foodName + " 1" + unitText + " = " + formatAmount(toNumber(unit.grams)) + "g";
+  const longPressProps = useLongPress(() => setIsActionOpen(true));
+
+  return (
+    <>
+      <article
+        className="my-food-card my-unit-card my-food-longpress-card"
+        aria-label={lineText}
+        title="길게 눌러 수정/삭제"
+        {...longPressProps}
+      >
+        <div className="my-unit-line">{lineText}</div>
+      </article>
+
+      {isActionOpen && (
+        <InlineActionSheet
+          title={lineText}
+          editLabel="단위 수정"
+          deleteLabel="단위 삭제"
+          onEdit={() => {
+            setIsActionOpen(false);
+            onEdit(unit);
+          }}
+          onDelete={() => {
+            setIsActionOpen(false);
+            onDelete(unit);
+          }}
+          onClose={() => setIsActionOpen(false)}
+        />
+      )}
+    </>
+  );
+}
+
+function MyFoodsScreen({ foods, aliases = [], units = [], onAdd, onEdit, onDelete, onDeleteAlias, onEditUnit, onDeleteUnit }) {
   const [activeMyFoodTab, setActiveMyFoodTab] = useState("foods");
 
   const tabCopy = {
@@ -5229,19 +5245,12 @@ function MyFoodsScreen({ foods, aliases = [], units = [], onAdd, onEdit, onDelet
         ) : (
           <div className="my-food-list">
             {foods.map((food) => (
-              <article className="my-food-card" key={food.userFoodId || food.id || food.name}>
-                <div className="my-food-main">
-                  <strong>{getFoodDisplayName(food)}</strong>
-                  <span>100g {Math.round(food.kcal)}kcal</span>
-                </div>
-                <div className="my-food-macros">
-                  C {formatMacro(food.carb)}g · P {formatMacro(food.protein)}g · F {formatMacro(food.fat)}g
-                </div>
-                <div className="my-food-actions">
-                  <button type="button" onClick={() => onEdit(food)}>수정</button>
-                  <button type="button" className="danger-button" onClick={() => onDelete(food)}>삭제</button>
-                </div>
-              </article>
+              <ManagedFoodCard
+                key={food.userFoodId || food.id || food.name}
+                food={food}
+                onEdit={onEdit}
+                onDelete={onDelete}
+              />
             ))}
           </div>
         )
@@ -5259,7 +5268,7 @@ function MyFoodsScreen({ foods, aliases = [], units = [], onAdd, onEdit, onDelet
               <AliasConnectionCard
                 key={alias.aliasId || alias.id || cleanFoodName(alias.aliasText || alias.name || "")}
                 alias={alias}
-                onLongPress={onAliasLongPress}
+                onDeleteAlias={onDeleteAlias}
               />
             ))}
           </div>
@@ -5275,20 +5284,12 @@ function MyFoodsScreen({ foods, aliases = [], units = [], onAdd, onEdit, onDelet
         ) : (
           <div className="my-food-list">
             {units.map((unit) => (
-              <article className="my-food-card" key={unit.userUnitId || unit.unitId || unit.foodName + unit.unitName}>
-                <div className="my-food-main">
-                  <strong>{unit.foodName}</strong>
-                  <span>{getUnitTargetTypeLabel(unit)}</span>
-                </div>
-                <div className="my-alias-target my-unit-target">
-                  <b>1{unit.unitName}</b>
-                  <span>= {formatAmount(toNumber(unit.grams))}g</span>
-                </div>
-                <div className="my-food-actions">
-                  <button type="button" onClick={() => onEditUnit(unit)}>수정</button>
-                  <button type="button" className="danger-button" onClick={() => onDeleteUnit(unit)}>삭제</button>
-                </div>
-              </article>
+              <UnitSettingCard
+                key={unit.userUnitId || unit.unitId || unit.foodName + unit.unitName}
+                unit={unit}
+                onEdit={onEditUnit}
+                onDelete={onDeleteUnit}
+              />
             ))}
           </div>
         )
