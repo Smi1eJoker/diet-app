@@ -315,11 +315,8 @@ function buildFoodMap(appFoods = [], userAliases = [], userFoods = [], foodSearc
     nextMap[aliasKey] = {
       ...canonical,
       id: "alias-" + (alias.alias_id || aliasKey),
-      aliasId: alias.alias_id || null,
-      aliasText: aliasName,
       name: aliasName,
       canonicalName: canonical.name,
-      aliasTargetSource: alias.user_food_id ? "user_food" : "app_food",
       source: "user_alias",
     };
   });
@@ -422,25 +419,6 @@ async function upsertUserAlias(session, aliasText, food) {
   );
 
   return Array.isArray(rows) && rows[0] ? rows[0] : payload;
-}
-
-async function deleteUserAlias(session, alias) {
-  const userId = getSessionUserId(session);
-  if (!userId) throw new Error("사용자 정보를 확인하지 못했어.");
-
-  const aliasId = alias?.aliasId || (String(alias?.id || "").startsWith("alias-") ? String(alias.id).replace("alias-", "") : "");
-  const aliasText = cleanFoodName(alias?.aliasText || alias?.name || "");
-  const encodedUserId = encodeURIComponent(userId);
-
-  const targetPath = aliasId && /^\d+$/.test(String(aliasId))
-    ? "/user_aliases?user_id=eq." + encodedUserId + "&alias_id=eq." + encodeURIComponent(aliasId)
-    : "/user_aliases?user_id=eq." + encodedUserId + "&alias_text=eq." + encodeURIComponent(aliasText);
-
-  await requestSupabaseRest(
-    targetPath,
-    { method: "DELETE", prefer: "return=minimal" },
-    session?.access_token
-  );
 }
 
 async function updateUserFood(session, userFoodId, food) {
@@ -731,59 +709,57 @@ function getFoodSearchTokens(value) {
   const tokens = [];
   const add = (token) => addUniqueToken(tokens, normalize(token));
 
+  // 후보 추천 전용 토큰이다. 자동 계산에는 절대 사용하지 않는다.
+  // 사용자 표현과 DB 표준 표현을 같이 넣어 후보 폭을 넓힌다.
   const rules = [
-    {
-      tokens: ["계란", "달걀"],
-      patterns: ["계란", "달걀", "계란후라이", "달걀프라이", "삶은계란", "삶은달걀"],
-    },
-    {
-      tokens: ["밥", "쌀밥", "백미", "백미밥", "공기밥"],
-      patterns: ["밥", "쌀밥", "백미밥", "흰밥", "공기밥", "햇반"],
-    },
-    {
-      tokens: ["닭", "닭고기", "가슴", "가슴살"],
-      patterns: ["닭가슴살", "닭고기가슴", "가슴살", "닭찌", "닭찌찌", "닭가"],
-    },
-    {
-      tokens: ["소", "소고기", "쇠고기", "한우"],
-      patterns: ["소고기", "쇠고기", "한우", "우둔", "양지", "채끝", "등심"],
-    },
-    {
-      tokens: ["돼지", "돼지고기"],
-      patterns: ["돼지고기", "돼지", "삼겹", "삼겹살", "목살", "목심", "앞다리", "뒷다리", "항정", "가브리"],
-    },
-    {
-      tokens: ["목살", "목심"],
-      patterns: ["목살", "목심"],
-    },
-    {
-      tokens: ["삼겹", "삼겹살"],
-      patterns: ["삼겹", "삼겹살"],
-    },
-    {
-      tokens: ["등심"],
-      patterns: ["등심"],
-    },
-    {
-      tokens: ["고구마"],
-      patterns: ["고구마", "찐고구마", "삶은고구마"],
-    },
-    {
-      tokens: ["감자"],
-      patterns: ["감자", "찐감자", "삶은감자"],
-    },
-    {
-      tokens: ["바나나"],
-      patterns: ["바나나", "banana"],
-    },
+    { tokens: ["닭"], patterns: ["닭고기", "닭가슴", "닭안심", "닭다리", "닭날개", "닭찌", "치킨"] },
+    { tokens: ["소", "소고기", "쇠고기", "한우"], patterns: ["소고기", "쇠고기", "한우", "우둔", "양지", "채끝"] },
+    { tokens: ["돼지", "돼지고기"], patterns: ["돼지고기", "돼지", "삼겹", "목살", "앞다리", "뒷다리", "항정", "가브리"] },
+    { tokens: ["오리"], patterns: ["오리"] },
+
+    { tokens: ["가슴", "가슴살"], patterns: ["가슴살", "가슴"] },
+    { tokens: ["안심"], patterns: ["안심"] },
+    { tokens: ["등심"], patterns: ["등심"] },
+    { tokens: ["목살", "목심"], patterns: ["목살", "목심"] },
+    { tokens: ["삼겹", "삼겹살"], patterns: ["삼겹", "삼겹살"] },
+    { tokens: ["갈비"], patterns: ["갈비"] },
+    { tokens: ["사태"], patterns: ["사태"] },
+    { tokens: ["양지"], patterns: ["양지"] },
+    { tokens: ["채끝"], patterns: ["채끝"] },
+    { tokens: ["다리"], patterns: ["다리", "허벅"] },
+    { tokens: ["날개"], patterns: ["날개", "윙", "봉"] },
+
+    { tokens: ["생것"], patterns: ["생것", "생"] },
+    { tokens: ["구운", "구이"], patterns: ["구운", "구이", "구웠", "팬", "석쇠", "오븐"] },
+    { tokens: ["삶은", "삶"], patterns: ["삶", "삶은", "수육"] },
+    { tokens: ["볶은", "볶"], patterns: ["볶", "볶은"] },
+    { tokens: ["튀긴", "튀김"], patterns: ["튀김", "튀긴", "프라이드"] },
+
+    { tokens: ["밥", "백미", "백미밥", "쌀밥", "공기밥"], patterns: ["밥", "공기밥", "쌀밥", "백미밥", "흰밥", "햇반"] },
+    { tokens: ["현미", "현미밥"], patterns: ["현미", "현미밥"] },
+    { tokens: ["귀리"], patterns: ["귀리"] },
+    { tokens: ["보리"], patterns: ["보리"] },
+    { tokens: ["잡곡"], patterns: ["잡곡", "혼합곡"] },
+    { tokens: ["흑미"], patterns: ["흑미"] },
+
+    { tokens: ["계란", "달걀"], patterns: ["계란", "달걀", "계란후라이", "달걀프라이", "삶은계란", "삶은달걀"] },
+    { tokens: ["고구마"], patterns: ["고구마", "찐고구마", "삶은고구마"] },
+    { tokens: ["감자"], patterns: ["감자", "찐감자", "삶은감자"] },
+    { tokens: ["바나나"], patterns: ["바나나", "banana"] },
   ];
 
   rules.forEach((rule) => {
-    const matched = rule.patterns.some((pattern) => text.includes(normalize(pattern)));
-    if (!matched) return;
-
+    if (!rule.patterns.some((pattern) => text.includes(normalize(pattern)))) return;
     rule.tokens.forEach(add);
   });
+
+  // 한국어 식단 입력에서 "가슴살"은 대부분 닭가슴살 의미로 쓰이므로 후보 추천에서만 닭+가슴으로 해석한다.
+  // 자동 계산은 여전히 사용자가 직접 연결한 user_aliases가 있어야만 된다.
+  if (text.includes("닭찌")) {
+    add("닭");
+    add("가슴");
+    add("가슴살");
+  }
 
   if (text.includes("가슴살") && !tokens.includes("닭") && !tokens.includes("소") && !tokens.includes("돼지") && !tokens.includes("오리")) {
     add("닭");
@@ -804,6 +780,57 @@ function getFoodSearchTokens(value) {
   }
 
   return tokens;
+}
+
+const FOOD_CANDIDATE_SYNONYM_GROUPS = [
+  ["계란", "달걀"],
+  ["밥", "쌀밥", "백미밥", "흰밥", "공기밥", "햇반"],
+  ["닭가슴살", "닭고기가슴", "가슴살", "닭찌", "닭찌찌", "닭가"],
+  ["소고기", "쇠고기", "한우"],
+  ["돼지고기", "돼지"],
+  ["목살", "목심"],
+  ["삼겹살", "삼겹"],
+  ["등심", "소고기등심", "쇠고기등심"],
+  ["고구마", "찐고구마", "삶은고구마"],
+  ["감자", "찐감자", "삶은감자"],
+  ["바나나", "banana"],
+];
+
+function getFoodCandidateSearchNames(name) {
+  const cleanName = cleanFoodName(name);
+  const normalizedName = normalize(cleanName);
+  if (!normalizedName) return [];
+
+  const names = [cleanName];
+
+  FOOD_CANDIDATE_SYNONYM_GROUPS.forEach((group) => {
+    const normalizedGroup = group.map(normalize);
+    const matchedKeywords = group.filter((keyword, index) => normalizedName.includes(normalizedGroup[index]));
+    if (matchedKeywords.length === 0) return;
+
+    group.forEach((keyword) => names.push(keyword));
+
+    matchedKeywords.forEach((keyword) => {
+      group.forEach((replacement) => {
+        if (normalize(keyword) === normalize(replacement)) return;
+        names.push(cleanName.replaceAll(keyword, replacement));
+      });
+    });
+  });
+
+  if (normalizedName.includes("가슴살") && !normalizedName.includes("닭") && !normalizedName.includes("소") && !normalizedName.includes("돼지") && !normalizedName.includes("오리")) {
+    names.push("닭가슴살", "닭고기가슴");
+  }
+
+  if (normalizedName.includes("목살") && !normalizedName.includes("돼지") && !normalizedName.includes("소")) {
+    names.push("돼지고기목살", "돼지고기목심");
+  }
+
+  if (normalizedName.includes("등심") && !normalizedName.includes("소") && !normalizedName.includes("돼지")) {
+    names.push("소고기등심", "쇠고기등심", "한우등심");
+  }
+
+  return [...new Set(names.map(cleanFoodName).filter(Boolean))];
 }
 
 function cleanFoodName(value) {
@@ -956,23 +983,8 @@ function getManagedUserFoods(customFoods) {
   return Object.values(customFoods || {})
     .filter((food) => {
       if (!food) return false;
-
-      // alias가 같은 이름의 user_food를 덮어쓴 경우에도 직접 등록 음식 탭에서 최소 1번은 보이게 한다.
-      if (food.source === "user_alias") {
-        return Boolean(food.userFoodId) && normalize(food.name) === normalize(food.canonicalName || food.name);
-      }
-
+      if (food.source === "user_alias") return false;
       return food.source === "user_food" || Boolean(food.userFoodId) || String(food.id || "").startsWith("custom-");
-    })
-    .map((food) => {
-      if (food.source !== "user_alias") return food;
-      return {
-        ...food,
-        id: "user-" + (food.userFoodId || normalize(food.canonicalName || food.name)),
-        name: food.canonicalName || food.name,
-        canonicalName: "",
-        source: "user_food",
-      };
     })
     .filter((food) => {
       const key = food.userFoodId ? "id:" + food.userFoodId : "name:" + normalize(food.name);
@@ -981,49 +993,6 @@ function getManagedUserFoods(customFoods) {
       return true;
     })
     .sort((a, b) => getFoodDisplayName(a).localeCompare(getFoodDisplayName(b), "ko-KR"));
-}
-
-function getManagedUserAliases(customFoods) {
-  const seen = new Set();
-
-  return Object.values(customFoods || {})
-    .filter((food) => food?.source === "user_alias")
-    .filter((alias) => {
-      const key = alias.aliasId ? "id:" + alias.aliasId : "name:" + normalize(alias.name);
-      if (!key || seen.has(key)) return false;
-      seen.add(key);
-      return true;
-    })
-    .sort((a, b) => cleanFoodName(a.name).localeCompare(cleanFoodName(b.name), "ko-KR"));
-}
-
-function getAliasTargetTypeLabel(alias) {
-  return alias?.userFoodId || alias?.aliasTargetSource === "user_food" ? "직접 등록 음식" : "표준 음식";
-}
-
-function removeManagedAliasFromMap(currentFoods, aliasToRemove) {
-  const nextFoods = { ...currentFoods };
-  const aliasKey = normalize(aliasToRemove?.aliasText || aliasToRemove?.name || "");
-
-  if (aliasKey) delete nextFoods[aliasKey];
-
-  // 같은 이름 alias가 user_food를 덮어쓴 상태였다면, 별칭 삭제 후에도 직접 등록 음식은 남겨둔다.
-  if (aliasToRemove?.userFoodId) {
-    const restoredName = cleanFoodName(aliasToRemove.canonicalName || aliasToRemove.name || "");
-    const restoredKey = normalize(restoredName);
-
-    if (restoredKey && !nextFoods[restoredKey]) {
-      nextFoods[restoredKey] = {
-        ...aliasToRemove,
-        id: "user-" + aliasToRemove.userFoodId,
-        name: restoredName,
-        canonicalName: "",
-        source: "user_food",
-      };
-    }
-  }
-
-  return nextFoods;
 }
 
 function makeUserFoodFormFromFood(food) {
@@ -1296,6 +1265,39 @@ function findFoodMatches(name, customFoods) {
   return dedupeFoodMatches(matches);
 }
 
+function findFoodMatchesExpanded(name, customFoods) {
+  if (!normalize(name)) return [];
+
+  const exactFood = findExactFoodByName(name, customFoods);
+  const expandedMatches = getFoodCandidateSearchNames(name)
+    .flatMap((searchName) => findFoodMatches(searchName, customFoods));
+
+  return dedupeFoodMatches([exactFood, ...expandedMatches].filter(Boolean));
+}
+
+function getFoodPreviewTitle(food, inputName) {
+  const inputLabel = cleanFoodName(inputName);
+  const targetLabel = getFoodDisplayName(food);
+
+  if (food?.source === "user_alias" && inputLabel && normalize(food.name) === normalize(inputLabel)) {
+    return normalize(inputLabel) === normalize(targetLabel)
+      ? targetLabel
+      : inputLabel + " → " + targetLabel;
+  }
+
+  return food?.displayName || targetLabel;
+}
+
+function getFoodPreviewMeta(food, inputName) {
+  const inputLabel = cleanFoodName(inputName);
+  const isAlias = food?.source === "user_alias" && inputLabel && normalize(food.name) === normalize(inputLabel);
+
+  if (!isAlias) return "";
+  if (food.userFoodId) return "저장된 연결 · 직접 등록 음식 · ";
+  if (food.appFoodId) return "저장된 연결 · 표준 음식 · ";
+  return "저장된 연결 · ";
+}
+
 function findFoodByName(name, customFoods) {
   return findExactFoodByName(name, customFoods);
 }
@@ -1431,7 +1433,7 @@ function findFoodForUnitAmount(name, unitText, customFoods, basisFood) {
   // 계란/달걀의 개·알 단위는 앱 공통 단위로 허용한다.
   // food_search_terms는 일반 자동 확정에는 쓰지 않지만, 계란 단위 입력만 예외적으로 후보 중 단위가 있는 음식을 사용한다.
   if (isEggUnitInput(name, unitText)) {
-    return findFoodMatches(name, customFoods).find((food) => findFoodUnit(food, unitText)) || exactFood || null;
+    return findFoodMatchesExpanded(name, customFoods).find((food) => findFoodUnit(food, unitText)) || exactFood || null;
   }
 
   return exactFood;
@@ -2547,7 +2549,6 @@ export default function App() {
   const totals = useMemo(() => calculateTotals(meals), [meals]);
   const stats = useMemo(() => buildStats(meals, activePlan, morningWeight, dailyRecords, selectedDate), [meals, activePlan, morningWeight, dailyRecords, selectedDate]);
   const managedUserFoods = useMemo(() => getManagedUserFoods(customFoods), [customFoods]);
-  const managedUserAliases = useMemo(() => getManagedUserAliases(customFoods), [customFoods]);
 
   useEffect(() => {
     if (!authSession || !cloudSyncReady || !HAS_SUPABASE_CONFIG) return;
@@ -2667,21 +2668,14 @@ export default function App() {
     ? findExactFoodByName(memoPreviewName, customFoods)
     : null;
 
-  const shouldHideMemoPreviewBySavedAlias = Boolean(
-    savedAliasPreviewFood &&
-      savedAliasPreviewFood.source === "user_alias" &&
-      normalize(savedAliasPreviewFood.name) === normalize(memoPreviewName)
-  );
-
-  const memoPreviewFoods = memoPreviewName && !shouldHideMemoPreviewBySavedAlias
-    ? findFoodMatches(memoPreviewName, customFoods)
+  const memoPreviewFoods = memoPreviewName
+    ? findFoodMatchesExpanded(memoPreviewName, customFoods)
     : [];
 
   const showMemoDbPreview = Boolean(
     memoPreviewName &&
       activeMemoRow.foods.trim() &&
-      !memoPreviewHidden &&
-      !shouldHideMemoPreviewBySavedAlias
+      !memoPreviewHidden
   );
 
   const today = new Intl.DateTimeFormat("ko-KR", {
@@ -3473,23 +3467,6 @@ export default function App() {
     setCustomFoods((current) => removeManagedUserFoodFromMap(current, food));
   };
 
-  const removeMyAlias = async (alias) => {
-    if (!alias) return;
-    const aliasName = cleanFoodName(alias.aliasText || alias.name || "");
-    if (!window.confirm(aliasName + " 음식 연결을 삭제할까?")) return;
-
-    if (HAS_SUPABASE_CONFIG && authSession) {
-      try {
-        await deleteUserAlias(authSession, alias);
-      } catch (error) {
-        setFoodDbError(error.message || "음식 연결 삭제에 실패했어.");
-        return;
-      }
-    }
-
-    setCustomFoods((current) => removeManagedAliasFromMap(current, alias));
-  };
-
   const openMemoMatchChoice = (food) => {
     if (!memoPreviewName || !food) return;
     const segmentIndex = getMemoSegmentIndex(activeMemoRow.foods, activeFoodCursor);
@@ -3684,7 +3661,7 @@ export default function App() {
   const nutritionCandidateFoods = useMemo(() => {
     if (!nutritionTarget) return [];
 
-    const matches = findFoodMatches(nutritionTarget.name, customFoods);
+    const matches = findFoodMatchesExpanded(nutritionTarget.name, customFoods);
     const currentFood = nutritionTarget.currentFood
       ? {
           ...nutritionTarget.currentFood,
@@ -3866,9 +3843,9 @@ export default function App() {
                       className={"memo-preview-row" + (isSavedAlias ? " is-saved-alias-basis" : "")}
                       onClick={() => openMemoMatchChoice(food)}
                     >
-                      <strong>{food.displayName || getFoodDisplayName(food)}</strong>
+                      <strong>{getFoodPreviewTitle(food, memoPreviewName)}</strong>
                       <span>
-                        100g {food.kcal}kcal · Carb {formatMacro(food.carb)}g · Pro {formatMacro(food.protein)}g · Fat {formatMacro(food.fat)}g
+                        {getFoodPreviewMeta(food, memoPreviewName)}100g {food.kcal}kcal · Carb {formatMacro(food.carb)}g · Pro {formatMacro(food.protein)}g · Fat {formatMacro(food.fat)}g
                       </span>
                     </button>
                   );
@@ -3935,11 +3912,9 @@ export default function App() {
       {activeTab === "foods" && (
         <MyFoodsScreen
           foods={managedUserFoods}
-          aliases={managedUserAliases}
           onAdd={openNewMyFoodModal}
           onEdit={openEditMyFoodModal}
           onDelete={removeMyFood}
-          onDeleteAlias={removeMyAlias}
         />
       )}
 
@@ -4577,127 +4552,40 @@ function BottomNav({ activeTab, onChange }) {
   );
 }
 
-function MyFoodsScreen({ foods, aliases = [], onAdd, onEdit, onDelete, onDeleteAlias }) {
-  const [activeMyFoodTab, setActiveMyFoodTab] = useState("foods");
-
-  const tabCopy = {
-    foods: {
-      kicker: "개인 음식 DB",
-      title: "직접 등록",
-      description: "직접 등록한 음식은 다음 메모 입력부터 자동 계산돼.",
-    },
-    aliases: {
-      kicker: "개인 연결 규칙",
-      title: "음식 연결",
-      description: "내가 입력하는 이름과 실제 계산 음식을 관리해.",
-    },
-    units: {
-      kicker: "개인 단위 설정",
-      title: "단위 설정",
-      description: "개/인분/공기 같은 단위별 g 설정을 관리해.",
-    },
-  }[activeMyFoodTab];
-
+function MyFoodsScreen({ foods, onAdd, onEdit, onDelete }) {
   return (
     <section className="my-foods-screen" aria-label="나의 음식">
       <div className="my-foods-head">
         <div>
-          <span>{tabCopy.kicker}</span>
+          <span>개인 음식 DB</span>
           <strong>나의 음식</strong>
-          <p>{tabCopy.description}</p>
+          <p>직접 등록한 음식은 다음 메모 입력부터 자동 계산돼.</p>
         </div>
-        {activeMyFoodTab === "foods" && (
-          <button type="button" className="primary-button" onClick={onAdd}>추가</button>
-        )}
+        <button type="button" className="primary-button" onClick={onAdd}>추가</button>
       </div>
 
-      <div className="segmented-control my-food-tabs" role="tablist" aria-label="나의 음식 관리 탭">
-        <button
-          type="button"
-          className={activeMyFoodTab === "foods" ? "is-selected" : ""}
-          onClick={() => setActiveMyFoodTab("foods")}
-        >
-          직접 등록
-        </button>
-        <button
-          type="button"
-          className={activeMyFoodTab === "aliases" ? "is-selected" : ""}
-          onClick={() => setActiveMyFoodTab("aliases")}
-        >
-          음식 연결
-        </button>
-        <button
-          type="button"
-          className={activeMyFoodTab === "units" ? "is-selected" : ""}
-          onClick={() => setActiveMyFoodTab("units")}
-        >
-          단위 설정
-        </button>
-      </div>
-
-      {activeMyFoodTab === "foods" && (
-        foods.length === 0 ? (
-          <div className="empty-state">
-            <strong>아직 저장한 음식이 없어.</strong>
-            <span>식단 카드의 음식 연결/등록에서 추가하거나 여기서 직접 추가해.</span>
-          </div>
-        ) : (
-          <div className="my-food-list">
-            {foods.map((food) => (
-              <article className="my-food-card" key={food.userFoodId || food.id || food.name}>
-                <div className="my-food-main">
-                  <strong>{getFoodDisplayName(food)}</strong>
-                  <span>100g {Math.round(food.kcal)}kcal</span>
-                </div>
-                <div className="my-food-macros">
-                  C {formatMacro(food.carb)}g · P {formatMacro(food.protein)}g · F {formatMacro(food.fat)}g
-                </div>
-                <div className="my-food-actions">
-                  <button type="button" onClick={() => onEdit(food)}>수정</button>
-                  <button type="button" className="danger-button" onClick={() => onDelete(food)}>삭제</button>
-                </div>
-              </article>
-            ))}
-          </div>
-        )
-      )}
-
-      {activeMyFoodTab === "aliases" && (
-        aliases.length === 0 ? (
-          <div className="empty-state">
-            <strong>아직 저장한 음식 연결이 없어.</strong>
-            <span>후보창에서 앞으로도 사용을 누르면 여기에 표시돼.</span>
-          </div>
-        ) : (
-          <div className="my-food-list">
-            {aliases.map((alias) => {
-              const aliasName = cleanFoodName(alias.aliasText || alias.name || "");
-              const targetName = cleanFoodName(alias.canonicalName || getFoodDisplayName(alias));
-
-              return (
-                <article className="my-food-card" key={alias.aliasId || alias.id || aliasName}>
-                  <div className="my-food-main">
-                    <strong>{aliasName}</strong>
-                    <span>{getAliasTargetTypeLabel(alias)}</span>
-                  </div>
-                  <div className="my-alias-target">
-                    <b>→</b>
-                    <span>{targetName}</span>
-                  </div>
-                  <div className="my-food-actions my-food-actions-single">
-                    <button type="button" className="danger-button" onClick={() => onDeleteAlias(alias)}>연결 삭제</button>
-                  </div>
-                </article>
-              );
-            })}
-          </div>
-        )
-      )}
-
-      {activeMyFoodTab === "units" && (
+      {foods.length === 0 ? (
         <div className="empty-state">
-          <strong>단위 설정은 다음 단계에서 연결하면 돼.</strong>
-          <span>예: 바나나 1개 = 120g, 제육 1인분 = 200g</span>
+          <strong>아직 저장한 음식이 없어.</strong>
+          <span>식단 카드의 음식 연결/등록에서 추가하거나 여기서 직접 추가해.</span>
+        </div>
+      ) : (
+        <div className="my-food-list">
+          {foods.map((food) => (
+            <article className="my-food-card" key={food.userFoodId || food.id || food.name}>
+              <div className="my-food-main">
+                <strong>{getFoodDisplayName(food)}</strong>
+                <span>100g {Math.round(food.kcal)}kcal</span>
+              </div>
+              <div className="my-food-macros">
+                C {formatMacro(food.carb)}g · P {formatMacro(food.protein)}g · F {formatMacro(food.fat)}g
+              </div>
+              <div className="my-food-actions">
+                <button type="button" onClick={() => onEdit(food)}>수정</button>
+                <button type="button" className="danger-button" onClick={() => onDelete(food)}>삭제</button>
+              </div>
+            </article>
+          ))}
         </div>
       )}
     </section>
