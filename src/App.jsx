@@ -1275,27 +1275,8 @@ function findFoodMatchesExpanded(name, customFoods) {
   return dedupeFoodMatches([exactFood, ...expandedMatches].filter(Boolean));
 }
 
-function getFoodPreviewTitle(food, inputName) {
-  const inputLabel = cleanFoodName(inputName);
-  const targetLabel = getFoodDisplayName(food);
-
-  if (food?.source === "user_alias" && inputLabel && normalize(food.name) === normalize(inputLabel)) {
-    return normalize(inputLabel) === normalize(targetLabel)
-      ? targetLabel
-      : inputLabel + " → " + targetLabel;
-  }
-
-  return food?.displayName || targetLabel;
-}
-
-function getFoodPreviewMeta(food, inputName) {
-  const inputLabel = cleanFoodName(inputName);
-  const isAlias = food?.source === "user_alias" && inputLabel && normalize(food.name) === normalize(inputLabel);
-
-  if (!isAlias) return "";
-  if (food.userFoodId) return "저장된 연결 · 직접 등록 음식 · ";
-  if (food.appFoodId) return "저장된 연결 · 표준 음식 · ";
-  return "저장된 연결 · ";
+function getFoodPreviewTitle(food) {
+  return food?.displayName || getFoodDisplayName(food);
 }
 
 function findFoodByName(name, customFoods) {
@@ -2607,12 +2588,13 @@ export default function App() {
   const activeMemoRow = visibleMemoRows[activeMemoRowIndex] || { time: "", foods: "" };
   const activeFoodCursor = Math.min(activeMemoFoodCursor, activeMemoRow.foods.length);
   const currentMemoBeforeCursor = activeMemoRow.foods.slice(0, activeFoodCursor);
+  const memoCursorIsAttachedToWord = /[^\s,，]$/.test(currentMemoBeforeCursor);
   const currentMemoSegment = currentMemoBeforeCursor
     .slice(Math.max(currentMemoBeforeCursor.lastIndexOf(","), currentMemoBeforeCursor.lastIndexOf("，")) + 1)
     .trim();
 
   const getMemoPreviewName = () => {
-    if (!currentMemoSegment) return "";
+    if (!memoCursorIsAttachedToWord || !currentMemoSegment) return "";
 
     const tokens = currentMemoSegment.split(/\s+/).filter(Boolean);
     if (tokens.length === 0) return "";
@@ -3843,9 +3825,9 @@ export default function App() {
                       className={"memo-preview-row" + (isSavedAlias ? " is-saved-alias-basis" : "")}
                       onClick={() => openMemoMatchChoice(food)}
                     >
-                      <strong>{getFoodPreviewTitle(food, memoPreviewName)}</strong>
+                      <strong>{getFoodPreviewTitle(food)}</strong>
                       <span>
-                        {getFoodPreviewMeta(food, memoPreviewName)}100g {food.kcal}kcal · Carb {formatMacro(food.carb)}g · Pro {formatMacro(food.protein)}g · Fat {formatMacro(food.fat)}g
+                        100g {food.kcal}kcal · Carb {formatMacro(food.carb)}g · Pro {formatMacro(food.protein)}g · Fat {formatMacro(food.fat)}g
                       </span>
                     </button>
                   );
