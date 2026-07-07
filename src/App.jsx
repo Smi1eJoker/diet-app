@@ -854,6 +854,22 @@ function formatAmount(value) {
   return Number.isInteger(value) ? String(value) : value.toFixed(1);
 }
 
+function splitMemoPreviewFoodName(value) {
+  const displayName = String(value || "").trim();
+
+  const parenMatch = displayName.match(/^(.+?)(\(.+\))$/);
+  if (parenMatch) {
+    return {
+      main: parenMatch[1],
+      sub: parenMatch[2],
+    };
+  }
+
+  return {
+    main: displayName,
+    sub: "",
+  };
+}
 
 function clamp(value, min, max) {
   return Math.min(max, Math.max(min, value));
@@ -2589,55 +2605,43 @@ export default function App() {
   const activeFoodCursor = Math.min(activeMemoFoodCursor, activeMemoRow.foods.length);
   const currentMemoBeforeCursor = activeMemoRow.foods.slice(0, activeFoodCursor);
   const memoCursorIsAttachedToWord = /[^\s,，]$/.test(currentMemoBeforeCursor);
-  const currentMemoSegment = currentMemoBeforeCursor
-    .slice(Math.max(currentMemoBeforeCursor.lastIndexOf(","), currentMemoBeforeCursor.lastIndexOf("，")) + 1)
-    .trim();
+  const currentMemoSegmentRaw = currentMemoBeforeCursor
+    .slice(Math.max(currentMemoBeforeCursor.lastIndexOf(","), currentMemoBeforeCursor.lastIndexOf("，")) + 1);
+  const currentMemoSegment = currentMemoSegmentRaw.trim();
+
+  const hasQuantityInMemoSegment = (segment) => {
+    const tokens = String(segment || "").trim().split(/\s+/).filter(Boolean);
+    if (tokens.length === 0) return false;
+
+    return tokens.some((token, index) => {
+      const previousToken = tokens[index - 1] || "";
+
+      if (/^[0-9]+(?:\.[0-9]+)?$/i.test(token)) return true;
+      if (/^[0-9]+(?:\.[0-9]+)?(?:g|그램)$/i.test(token)) return true;
+      if (/^(g|그램)$/i.test(token) && /^[0-9]+(?:\.[0-9]+)?$/i.test(previousToken)) return true;
+
+      const compactUnit = parseQuantityUnitToken(token);
+      if (compactUnit?.quantity > 0 && compactUnit.unitText) return true;
+
+      const separatedUnit = index > 0 ? parseQuantityUnitTokens(previousToken, token) : null;
+      if (separatedUnit?.quantity > 0 && separatedUnit.unitText) return true;
+
+      const attachedUnit = parseAttachedFoodUnitToken(token);
+      if (attachedUnit?.quantity > 0 && attachedUnit.unitText) return true;
+
+      return false;
+    });
+  };
 
   const getMemoPreviewName = () => {
-    if (!memoCursorIsAttachedToWord || !currentMemoSegment) return "";
+    if (!memoCursorIsAttachedToWord) return "";
+    if (!currentMemoSegment) return "";
+    if (hasQuantityInMemoSegment(currentMemoSegment)) return "";
+    if (/^\d{1,2}:?\d{0,2}$/.test(currentMemoSegment)) return "";
 
-    const tokens = currentMemoSegment.split(/\s+/).filter(Boolean);
-    if (tokens.length === 0) return "";
-
-    const nameTokens = [...tokens];
-
-    // 커서가 "소고기 등심 300g" 뒤에 있거나 "소고기 등심 300 g" 뒤에 있어도
-    // 후보 검색어는 "소고기등심"으로 유지한다.
-    while (nameTokens.length > 0) {
-      const lastToken = nameTokens.at(-1) || "";
-      const previousToken = nameTokens.at(-2) || "";
-      const compactUnit = parseQuantityUnitToken(lastToken);
-      const separatedUnit = parseQuantityUnitTokens(previousToken, lastToken);
-
-      if (compactUnit?.quantity > 0 && compactUnit.unitText) {
-        nameTokens.pop();
-        continue;
-      }
-
-      if (separatedUnit?.quantity > 0 && separatedUnit.unitText) {
-        nameTokens.splice(-2, 2);
-        continue;
-      }
-
-      if (/^[0-9]+(?:\.[0-9]+)?(?:g|그램)?$/i.test(lastToken)) {
-        nameTokens.pop();
-        continue;
-      }
-
-      if (/^(g|그램)$/i.test(lastToken)) {
-        nameTokens.pop();
-        continue;
-      }
-
-      break;
-    }
-
-    const rawName = nameTokens.join(" ").trim();
-    if (!rawName) return "";
-    if (/^\d{1,2}:?\d{0,2}$/.test(rawName)) return "";
-
-    return cleanFoodName(rawName);
+    return cleanFoodName(currentMemoSegment);
   };
+
   const memoPreviewName = getMemoPreviewName();
   const isSavedAliasPreviewFood = (food) =>
   Boolean(
@@ -2646,12 +2650,30 @@ export default function App() {
       normalize(food.name) === normalize(memoPreviewName)
   );
 
-  const savedAliasPreviewFood = memoPreviewName
+  const savedPreviewFood = memoPreviewName
     ? findExactFoodByName(memoPreviewName, customFoods)
     : null;
 
+  const isSavedAliasPreviewFood = (food) => {
+    if (!savedPreviewFood || !food) return false;
+
+    const sameId = food.id && savedPreviewFood.id && food.id === savedPreviewFood.id;
+    const sameBasis = getFoodMatchKey(food) === getFoodMatchKey(savedPreviewFood);
+
+    return sameId || sameBasis;
+  };
+
+  const memoPreviewSearchNames = memoPreviewName
+    ? typeof getFoodCandidateSearchNames === "function"
+      ? getFoodCandidateSearchNames(memoPreviewName)
+      : [memoPreviewName]
+    : [];
+
   const memoPreviewFoods = memoPreviewName
-    ? findFoodMatchesExpanded(memoPreviewName, customFoods)
+    ? dedupeFoodMatches([
+        ...(savedPreviewFood ? [savedPreviewFood] : []),
+        ...memoPreviewSearchNames.flatMap((name) => findFoodMatches(name, customFoods)),
+      ])
     : [];
 
   const showMemoDbPreview = Boolean(
@@ -3818,6 +3840,9 @@ export default function App() {
               {memoPreviewFoods.length > 0 ? (
                 memoPreviewFoods.map((food) => {
                   const isSavedAlias = isSavedAliasPreviewFood(food);
+                  const displayName = food.displayName || getFoodDisplayName(food);
+                  const nameParts = splitMemoPreviewFoodName(displayName);
+
                   return (
                     <button
                       key={food.id}
@@ -3825,10 +3850,17 @@ export default function App() {
                       className={"memo-preview-row" + (isSavedAlias ? " is-saved-alias-basis" : "")}
                       onClick={() => openMemoMatchChoice(food)}
                     >
-                      <strong>{getFoodPreviewTitle(food)}</strong>
-                      <span>
-                        100g {food.kcal}kcal · Carb {formatMacro(food.carb)}g · Pro {formatMacro(food.protein)}g · Fat {formatMacro(food.fat)}g
-                      </span>
+                      <div className="memo-preview-name">
+                        <strong>{nameParts.main}</strong>
+                        {nameParts.sub && <small>{nameParts.sub}</small>}
+                      </div>
+
+                      <div className="memo-preview-nutrients">
+                        <span>100g {formatAmount(toNumber(food.kcal))}kcal</span>
+                        <span>
+                          C {formatMacro(food.carb)}g · P {formatMacro(food.protein)}g · F {formatMacro(food.fat)}g
+                        </span>
+                      </div>
                     </button>
                   );
                 })
