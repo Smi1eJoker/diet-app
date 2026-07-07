@@ -2610,15 +2610,20 @@ export default function App() {
   const currentMemoSegment = currentMemoSegmentRaw.trim();
 
   const hasQuantityInMemoSegment = (segment) => {
-    const tokens = String(segment || "").trim().split(/\s+/).filter(Boolean);
-    if (tokens.length === 0) return false;
+    const segmentText = String(segment || "").trim();
+    if (!segmentText) return false;
+
+    // 참고란은 "순수 음식명 입력 중"에만 띄운다.
+    // 숫자가 들어간 순간부터는 중량/단위 입력 중으로 보고 숨긴다.
+    // 예: 보충제 4, 보충제 40g, 계란 1개, 닭가슴살200g
+    if (/\d/.test(segmentText)) return true;
+
+    const tokens = segmentText.split(/\s+/).filter(Boolean);
 
     return tokens.some((token, index) => {
       const previousToken = tokens[index - 1] || "";
 
-      if (/^[0-9]+(?:\.[0-9]+)?$/i.test(token)) return true;
-      if (/^[0-9]+(?:\.[0-9]+)?(?:g|그램)$/i.test(token)) return true;
-      if (/^(g|그램)$/i.test(token) && /^[0-9]+(?:\.[0-9]+)?$/i.test(previousToken)) return true;
+      if (/^(g|그램|개|알|공기|인분|봉|팩|스쿱)$/i.test(token)) return true;
 
       const compactUnit = parseQuantityUnitToken(token);
       if (compactUnit?.quantity > 0 && compactUnit.unitText) return true;
@@ -2643,12 +2648,6 @@ export default function App() {
   };
 
   const memoPreviewName = getMemoPreviewName();
-  const isSavedAliasPreviewFood = (food) =>
-  Boolean(
-    memoPreviewName &&
-      food?.source === "user_alias" &&
-      normalize(food.name) === normalize(memoPreviewName)
-  );
 
   const savedPreviewFood = memoPreviewName
     ? findExactFoodByName(memoPreviewName, customFoods)

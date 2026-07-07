@@ -4349,3 +4349,75 @@ textarea,
     font-size: 10.5px;
   }
 }
+
+
+/* v19: final memo preview cleanup - force two-column/two-line layout */
+.memo-db-preview .memo-preview-row {
+  min-height: 58px !important;
+  display: grid !important;
+  grid-template-columns: minmax(0, 1fr) auto !important;
+  align-items: center !important;
+  gap: 10px !important;
+  padding: 9px 11px !important;
+}
+
+.memo-db-preview .memo-preview-row .memo-preview-name {
+  min-width: 0 !important;
+  display: grid !important;
+  gap: 2px !important;
+  align-content: center !important;
+}
+
+.memo-db-preview .memo-preview-row .memo-preview-name strong,
+.memo-db-preview .memo-preview-row .memo-preview-name small {
+  min-width: 0 !important;
+  max-width: 100% !important;
+  flex: none !important;
+  text-align: left !important;
+  line-height: 1.15 !important;
+  word-break: keep-all !important;
+  overflow-wrap: anywhere !important;
+}
+
+.memo-db-preview .memo-preview-row .memo-preview-name strong {
+  font-size: 14px !important;
+  font-weight: 900 !important;
+}
+
+.memo-db-preview .memo-preview-row .memo-preview-name small {
+  font-size: 12px !important;
+  font-weight: 900 !important;
+}
+
+.memo-db-preview .memo-preview-row .memo-preview-nutrients {
+  min-width: 150px !important;
+  display: grid !important;
+  gap: 2px !important;
+  justify-items: end !important;
+  text-align: right !important;
+}
+
+.memo-db-preview .memo-preview-row .memo-preview-nutrients span {
+  display: block !important;
+  flex: none !important;
+  color: #b8b8b8 !important;
+  font-size: 11px !important;
+  font-weight: 900 !important;
+  line-height: 1.2 !important;
+  text-align: right !important;
+  white-space: nowrap !important;
+}
+
+.memo-db-preview .memo-preview-row .memo-preview-nutrients span:first-child {
+  color: #f5f5f5 !important;
+}
+
+.memo-db-preview .memo-preview-row.is-saved-alias-basis {
+  border-color: #66e36f !important;
+  background: rgba(102, 227, 111, 0.08) !important;
+}
+
+.memo-db-preview .memo-preview-row.is-saved-alias-basis .memo-preview-name strong,
+.memo-db-preview .memo-preview-row.is-saved-alias-basis .memo-preview-name small {
+  color: #66e36f !important;
+}
