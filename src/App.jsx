@@ -729,68 +729,78 @@ function getFoodSearchTokens(value) {
   if (!text) return [];
 
   const tokens = [];
-  const add = (token) => addUniqueToken(tokens, token);
+  const add = (token) => addUniqueToken(tokens, normalize(token));
 
-  // 후보 추천 전용 토큰이다. 자동 계산에는 절대 사용하지 않는다.
-  // 한 글자 전체 검색은 너무 넓기 때문에, "닭" 단독 검색 같은 경우는 아래 점수 함수에서 걸러낸다.
   const rules = [
-    { token: "닭", patterns: ["닭고기", "닭가슴", "닭안심", "닭다리", "닭날개", "닭찌", "치킨"] },
-    { token: "소", patterns: ["소고기", "쇠고기", "한우", "우둔", "양지", "채끝"] },
-    { token: "돼지", patterns: ["돼지고기", "삼겹", "목살", "앞다리", "뒷다리", "항정", "가브리"] },
-    { token: "오리", patterns: ["오리"] },
-
-    { token: "가슴", patterns: ["가슴살", "가슴"] },
-    { token: "안심", patterns: ["안심"] },
-    { token: "등심", patterns: ["등심"] },
-    { token: "목살", patterns: ["목살", "목심"] },
-    { token: "삼겹", patterns: ["삼겹"] },
-    { token: "갈비", patterns: ["갈비"] },
-    { token: "사태", patterns: ["사태"] },
-    { token: "양지", patterns: ["양지"] },
-    { token: "채끝", patterns: ["채끝"] },
-    { token: "다리", patterns: ["다리", "허벅"] },
-    { token: "날개", patterns: ["날개", "윙", "봉"] },
-
-    { token: "생것", patterns: ["생것", "생"] },
-    { token: "구운", patterns: ["구운", "구이", "구웠", "팬", "석쇠", "오븐"] },
-    { token: "삶은", patterns: ["삶", "삶은", "수육"] },
-    { token: "볶은", patterns: ["볶", "볶은"] },
-    { token: "튀긴", patterns: ["튀김", "튀긴", "프라이드"] },
-
-    { token: "밥", patterns: ["밥", "공기밥", "쌀밥"] },
-    { token: "백미", patterns: ["백미", "쌀밥", "공기밥"] },
-    { token: "현미", patterns: ["현미"] },
-    { token: "귀리", patterns: ["귀리"] },
-    { token: "보리", patterns: ["보리"] },
-    { token: "잡곡", patterns: ["잡곡", "혼합곡"] },
-    { token: "흑미", patterns: ["흑미"] },
-
-    { token: "계란", patterns: ["계란", "달걀"] },
-    { token: "고구마", patterns: ["고구마"] },
-    { token: "감자", patterns: ["감자"] },
+    {
+      tokens: ["계란", "달걀"],
+      patterns: ["계란", "달걀", "계란후라이", "달걀프라이", "삶은계란", "삶은달걀"],
+    },
+    {
+      tokens: ["밥", "쌀밥", "백미", "백미밥", "공기밥"],
+      patterns: ["밥", "쌀밥", "백미밥", "흰밥", "공기밥", "햇반"],
+    },
+    {
+      tokens: ["닭", "닭고기", "가슴", "가슴살"],
+      patterns: ["닭가슴살", "닭고기가슴", "가슴살", "닭찌", "닭찌찌", "닭가"],
+    },
+    {
+      tokens: ["소", "소고기", "쇠고기", "한우"],
+      patterns: ["소고기", "쇠고기", "한우", "우둔", "양지", "채끝", "등심"],
+    },
+    {
+      tokens: ["돼지", "돼지고기"],
+      patterns: ["돼지고기", "돼지", "삼겹", "삼겹살", "목살", "목심", "앞다리", "뒷다리", "항정", "가브리"],
+    },
+    {
+      tokens: ["목살", "목심"],
+      patterns: ["목살", "목심"],
+    },
+    {
+      tokens: ["삼겹", "삼겹살"],
+      patterns: ["삼겹", "삼겹살"],
+    },
+    {
+      tokens: ["등심"],
+      patterns: ["등심"],
+    },
+    {
+      tokens: ["고구마"],
+      patterns: ["고구마", "찐고구마", "삶은고구마"],
+    },
+    {
+      tokens: ["감자"],
+      patterns: ["감자", "찐감자", "삶은감자"],
+    },
+    {
+      tokens: ["바나나"],
+      patterns: ["바나나", "banana"],
+    },
   ];
 
   rules.forEach((rule) => {
-    if (rule.patterns.some((pattern) => text.includes(normalize(pattern)))) add(rule.token);
-  });
+    const matched = rule.patterns.some((pattern) => text.includes(normalize(pattern)));
+    if (!matched) return;
 
-  // 한국어 식단 입력에서 "가슴살"은 대부분 닭가슴살 의미로 쓰이므로 후보 추천에서만 닭+가슴으로 해석한다.
-  // 자동 계산은 여전히 사용자가 직접 연결한 user_aliases가 있어야만 된다.
-  if (text.includes("닭찌")) {
-    add("닭");
-    add("가슴");
-  }
+    rule.tokens.forEach(add);
+  });
 
   if (text.includes("가슴살") && !tokens.includes("닭") && !tokens.includes("소") && !tokens.includes("돼지") && !tokens.includes("오리")) {
     add("닭");
+    add("닭고기");
   }
 
   if (text.includes("목살") && !tokens.includes("돼지") && !tokens.includes("소")) {
     add("돼지");
+    add("돼지고기");
+    add("목심");
   }
 
   if (text.includes("등심") && !tokens.includes("소") && !tokens.includes("돼지")) {
     add("소");
+    add("소고기");
+    add("쇠고기");
+    add("한우");
   }
 
   return tokens;
