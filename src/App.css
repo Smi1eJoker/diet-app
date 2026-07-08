@@ -4483,88 +4483,41 @@ textarea,
   }
 }
 
-/* requested update: cleaner food candidate rows in basis-selection modals */
-.nutrition-modal .alias-candidate-list button,
-.alias-candidate-list button {
-  min-height: 58px;
-  display: grid !important;
-  grid-template-columns: minmax(0, 1fr) minmax(148px, auto) !important;
-  align-items: center;
-  gap: 10px;
-  padding: 10px 11px;
-}
 
-.alias-candidate-list .candidate-food-name {
-  min-width: 0;
-  display: grid;
-  gap: 2px;
-  align-content: center;
-}
-
-.alias-candidate-list .candidate-food-name strong {
-  min-width: 0;
-  color: #f5f5f5;
-  font-size: 14px;
-  font-weight: 900;
-  line-height: 1.15;
-  word-break: keep-all;
-  overflow-wrap: anywhere;
-}
-
-.alias-candidate-list .candidate-food-name small {
-  color: #f5f5f5;
-  font-size: 12px;
-  font-weight: 900;
-  line-height: 1.15;
-  word-break: keep-all;
-  overflow-wrap: anywhere;
-}
-
-.alias-candidate-list .candidate-food-nutrients {
-  min-width: 148px;
-  display: grid;
-  gap: 2px;
-  justify-items: end;
-  text-align: right;
-}
-
-.alias-candidate-list .candidate-food-nutrients span {
-  color: #b8b8b8;
-  font-size: 11px;
-  font-weight: 900;
-  line-height: 1.2;
-  white-space: nowrap;
-}
-
-.alias-candidate-list .candidate-food-nutrients span:first-child {
-  color: #f5f5f5;
-}
-
-.alias-candidate-list button.is-current-basis .candidate-food-name strong,
-.alias-candidate-list button.is-current-basis .candidate-food-name small {
-  color: #66e36f;
-}
-
-.compact-modal-empty {
-  margin-top: 2px;
-  padding: 18px 12px;
-}
-
+/* daily calorie 24h + smoother date swipe */
 .chart-range-toggle.has-three-options {
   grid-template-columns: repeat(3, minmax(0, 1fr));
 }
 
-@media (max-width: 360px) {
-  .nutrition-modal .alias-candidate-list button,
-  .alias-candidate-list button {
-    grid-template-columns: minmax(0, 1fr) minmax(130px, auto) !important;
-  }
+.app-shell.can-date-swipe {
+  touch-action: pan-y;
+}
 
-  .alias-candidate-list .candidate-food-nutrients {
-    min-width: 130px;
-  }
+.app-shell.is-date-swiping > :not(.app-footer-actions):not(.modal-backdrop):not(.sheet-backdrop),
+.app-shell.is-date-settling > :not(.app-footer-actions):not(.modal-backdrop):not(.sheet-backdrop) {
+  transform: translateX(var(--date-swipe-offset, 0px));
+  will-change: transform;
+}
 
-  .alias-candidate-list .candidate-food-nutrients span {
-    font-size: 10.5px;
-  }
+.app-shell.is-date-swiping > :not(.app-footer-actions):not(.modal-backdrop):not(.sheet-backdrop) {
+  transition: none;
+}
+
+.app-shell.is-date-settling > :not(.app-footer-actions):not(.modal-backdrop):not(.sheet-backdrop) {
+  transition: transform 180ms cubic-bezier(0.22, 0.61, 0.36, 1);
+}
+
+.nutrition-empty-hint {
+  margin: 0;
+  padding: 12px;
+  border: 1px dashed #303030;
+  border-radius: 12px;
+  color: #b8b8b8;
+  font-size: 12px;
+  font-weight: 900;
+  line-height: 1.45;
+}
+
+.modal-actions.single-action {
+  grid-template-columns: 1fr;
 }
