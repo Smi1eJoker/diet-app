@@ -20,31 +20,51 @@ export function clamp(value, min, max) {
 export function getNumericProfile(profile) {
   const weight = clamp(toNumber(profile.weight) || FALLBACK_PROFILE.weight, 30, 200);
   const bodyFatUnit = profile.bodyFatUnit || "kg";
-  const rawBodyFatValue = toNumber(profile.bodyFatValue ?? profile.bodyFatMass);
-  const bodyFatRate = bodyFatUnit === "percent"
-    ? clamp(rawBodyFatValue || FALLBACK_PROFILE.bodyFatValue, 0, 70)
-    : weight > 0
-      ? (clamp(rawBodyFatValue || FALLBACK_PROFILE.bodyFatMass, 0, weight * 0.7) / weight) * 100
-      : 0;
-  const bodyFatMass = bodyFatUnit === "percent"
-    ? weight * (bodyFatRate / 100)
-    : clamp(rawBodyFatValue || FALLBACK_PROFILE.bodyFatMass, 0, weight * 0.7);
+  const bodyCompositionMode = ["none", "muscle", "fat", "both"].includes(profile.bodyCompositionMode)
+    ? profile.bodyCompositionMode
+    : inferBodyCompositionMode(profile);
+  const hasFatInput = bodyCompositionMode === "fat" || bodyCompositionMode === "both";
+  const hasMuscleInput = bodyCompositionMode === "muscle" || bodyCompositionMode === "both";
+  const rawBodyFatValue = hasFatInput ? toNumber(profile.bodyFatValue ?? profile.bodyFatMass) : 0;
+  const bodyFatRate = hasFatInput
+    ? bodyFatUnit === "percent"
+      ? clamp(rawBodyFatValue, 0, 70)
+      : weight > 0
+        ? (clamp(rawBodyFatValue, 0, weight * 0.7) / weight) * 100
+        : 0
+    : 0;
+  const bodyFatMass = hasFatInput
+    ? bodyFatUnit === "percent"
+      ? weight * (bodyFatRate / 100)
+      : clamp(rawBodyFatValue, 0, weight * 0.7)
+    : 0;
 
   return {
     ...profile,
     age: clamp(toNumber(profile.age) || FALLBACK_PROFILE.age, 14, 90),
     height: clamp(toNumber(profile.height) || FALLBACK_PROFILE.height, 120, 230),
     weight,
-    bodyFatValue: rawBodyFatValue || FALLBACK_PROFILE.bodyFatValue,
+    bodyCompositionMode,
+    bodyFatValue: rawBodyFatValue,
     bodyFatUnit,
     bodyFatMass,
     bodyFatRate,
-    muscleMass: clamp(toNumber(profile.muscleMass) || FALLBACK_PROFILE.muscleMass, 10, 70),
+    muscleMass: hasMuscleInput ? clamp(toNumber(profile.muscleMass), 0, 100) : 0,
     steps: clamp(toNumber(profile.steps), 0, 40000),
     weightSessions: clamp(toNumber(profile.weightSessions), 0, 14),
     cardioSessions: clamp(toNumber(profile.cardioSessions), 0, 14),
     cardioMinutes: clamp(toNumber(profile.cardioMinutes), 0, 300),
   };
+}
+
+function inferBodyCompositionMode(profile) {
+  const hasMuscle = profile.muscleMass !== "" && profile.muscleMass !== undefined && toNumber(profile.muscleMass) > 0;
+  const fatValue = profile.bodyFatValue ?? profile.bodyFatMass;
+  const hasFat = fatValue !== "" && fatValue !== undefined && toNumber(fatValue) > 0;
+  if (hasMuscle && hasFat) return "both";
+  if (hasMuscle) return "muscle";
+  if (hasFat) return "fat";
+  return "none";
 }
 
 export function getMifflinBmr(data) {
@@ -68,36 +88,35 @@ export function getGoalCalorieMultiplier(goalKey) {
 export function getStepCalories(steps) {
   const value = toNumber(steps);
   if (value <= 3000) return 0;
-  if (value <= 5000) return 200;
-  if (value <= 8000) return 400;
-  if (value <= 10000) return 450;
-  return 550;
+  if (value <= 5000) return 100;
+  if (value <= 8000) return 200;
+  if (value <= 10000) return 300;
+  return 400;
 }
 
 export function getWeightTrainingCalories(sessions) {
   const value = toNumber(sessions);
   if (value <= 0) return 0;
-  if (value <= 2) return 140;
-  if (value <= 4) return 260;
-  if (value <= 6) return 360;
-  return 430;
+  if (value <= 2) return 80;
+  if (value <= 4) return 150;
+  if (value <= 6) return 250;
+  return 300;
 }
 
 export function getJobCalories(jobActivity) {
   const caloriesByJob = {
     sedentary: 0,
-    light: 150,
-    moderate: 280,
-    high: 420,
-    physical: 600,
+    light: 100,
+    moderate: 150,
+    high: 250,
+    physical: 400,
   };
 
   return caloriesByJob[jobActivity] ?? caloriesByJob.light;
 }
 
 export function getCardioCalories(data) {
-  const weeklyCardioHours = (toNumber(data.cardioSessions) * toNumber(data.cardioMinutes)) / 60;
-  return Math.round((data.weight * 7 * weeklyCardioHours) / 7);
+  return 0;
 }
 
 export function buildMacroTargets(calorieGoal, data, goalKey) {
@@ -130,15 +149,6 @@ export function getMacroIntakeStatus(macro, value, target, profileOrWeight) {
     return { tone: "ok", isOver: false, isLow: false, message: "" };
   }
 
-  if (macro === "fat" && amount > 0 && targetValue > 0 && amount <= targetValue * 0.6) {
-    return {
-      tone: "warning",
-      isOver: false,
-      isLow: true,
-      message: "지방이 부족합니다. 계란, 견과류, 닭다리살, 목살 등을 추가해보세요.",
-    };
-  }
-
   if (targetValue > 0 && amount > targetValue) {
     return { tone: "warning", isOver: true, isLow: false, message: "" };
   }
@@ -151,13 +161,13 @@ export function buildNutritionPlan(profile) {
   const goalKey = data.goal || FALLBACK_PROFILE.goal;
   const goal = GOAL_OPTIONS[goalKey] || GOAL_OPTIONS.maintain;
   const job = JOB_ACTIVITY_OPTIONS.find((option) => option.value === (data.jobActivity || FALLBACK_PROFILE.jobActivity)) || JOB_ACTIVITY_OPTIONS[1];
-  const leanMass = clamp(data.weight - data.bodyFatMass, data.weight * 0.35, data.weight);
+  const leanMass = data.bodyFatMass > 0 ? clamp(data.weight - data.bodyFatMass, data.weight * 0.35, data.weight) : 0;
   const bmr = getMifflinBmr(data);
   const effectiveSteps = data.steps > 0 ? data.steps : job.defaultSteps;
   const livingCalories = LIVING_CALORIES;
   const stepCalories = getStepCalories(effectiveSteps);
   const weightCalories = getWeightTrainingCalories(data.weightSessions);
-  const cardioCalories = getCardioCalories(data);
+  const cardioCalories = 0;
   const jobCalories = getJobCalories(data.jobActivity || FALLBACK_PROFILE.jobActivity);
   const activityCalories = stepCalories + weightCalories + cardioCalories + jobCalories;
   const subtotal = bmr + activityCalories;
@@ -298,7 +308,10 @@ export function isRequiredProfileFilled(profile) {
       toNumber(profile.height) > 0 &&
       toNumber(profile.weight) > 0 &&
       profile.jobActivity &&
-      profile.goal
+      profile.goal &&
+      toNumber(profile.steps) > 0 &&
+      profile.weightSessions !== "" &&
+      profile.weightSessions !== undefined
   );
 }
 

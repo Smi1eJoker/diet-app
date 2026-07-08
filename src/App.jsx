@@ -2590,8 +2590,14 @@ function BottomNav({ activeTab, onChange }) {
   );
 }
 
+const BODY_COMPOSITION_OPTIONS = [
+  { value: "none", label: "입력 안 함" },
+  { value: "muscle", label: "골격근량" },
+  { value: "fat", label: "체지방량/체지방률" },
+  { value: "both", label: "둘 다 입력" },
+];
+
 function SetupScreen({ profile, onProfileChange, onSubmit }) {
-  const [showAdvanced, setShowAdvanced] = useState(false);
   const canCalculate = isRequiredProfileFilled(profile);
 
   const handleStepsChange = (value) => {
@@ -2655,8 +2661,9 @@ function SetupScreen({ profile, onProfileChange, onSubmit }) {
             <small>kg</small>
           </div>
 
-          <BodyFatField profile={profile} onProfileChange={onProfileChange} />
         </section>
+
+        <BodyCompositionField profile={profile} onProfileChange={onProfileChange} />
 
         <section className="daily-calc-section">
           <div className="section-title">
@@ -2672,14 +2679,14 @@ function SetupScreen({ profile, onProfileChange, onSubmit }) {
                 selected={profile.jobActivity === option.value}
                 onSelect={() => {
                   onProfileChange("jobActivity", option.value);
-                  onProfileChange("steps", "");
+                  onProfileChange("steps", String(option.defaultSteps));
                 }}
               />
             ))}
           </div>
 
           <label className="precise-steps-field">
-            <span>정확한 평균 걸음 수를 알고 있다면 입력하세요. <em>(선택)</em></span>
+            <span>평균 걸음 수 <em>(필수)</em></span>
             <div>
               <input
                 type="number"
@@ -2692,6 +2699,8 @@ function SetupScreen({ profile, onProfileChange, onSubmit }) {
               <small>보/일</small>
             </div>
           </label>
+
+          <NumberField label="웨이트 주 횟수" unit="회/주" value={profile.weightSessions} min="0" max="14" onChange={(value) => onProfileChange("weightSessions", value)} />
         </section>
 
         <section className="daily-calc-section">
@@ -2715,21 +2724,7 @@ function SetupScreen({ profile, onProfileChange, onSubmit }) {
           </div>
         </section>
 
-        <button className="advanced-toggle" type="button" onClick={() => setShowAdvanced((current) => !current)}>
-          <span>{showAdvanced ? "-" : "+"} 상세 운동 정보 입력 <em>(선택)</em></span>
-          <strong>{showAdvanced ? "접기" : "열기"}</strong>
-        </button>
-
-        {showAdvanced && (
-          <section className="advanced-panel">
-            <NumberField label="골격근량" unit="kg" value={profile.muscleMass} min="10" max="70" step="0.1" onChange={(value) => onProfileChange("muscleMass", value)} />
-            <NumberField label="웨이트 주 횟수" unit="회/주" value={profile.weightSessions} min="0" max="14" onChange={(value) => onProfileChange("weightSessions", value)} />
-            <NumberField label="유산소 주 횟수" unit="회/주" value={profile.cardioSessions} min="0" max="14" onChange={(value) => onProfileChange("cardioSessions", value)} />
-            <NumberField label="유산소 1회 평균" unit="분" value={profile.cardioMinutes} min="0" max="300" step="5" onChange={(value) => onProfileChange("cardioMinutes", value)} />
-          </section>
-        )}
-
-        {!canCalculate && <p className="setup-required-hint">성별, 나이, 키, 체중, 활동량, 목표를 모두 입력하면 계산할 수 있어요.</p>}
+        {!canCalculate && <p className="setup-required-hint">성별, 나이, 키, 체중, 목표, 평균 걸음 수, 웨이트 횟수, 직업 활동량을 입력하면 계산할 수 있어요.</p>}
 
         <button className="setup-submit" type="submit" disabled={!canCalculate}>
           계산하기
@@ -2759,27 +2754,75 @@ function NumberField({ label, unit, value, min, max, step = "1", onChange }) {
   );
 }
 
-function BodyFatField({ profile, onProfileChange }) {
+function BodyCompositionField({ profile, onProfileChange }) {
+  const hasMuscle = profile.muscleMass !== "" && profile.muscleMass !== undefined && toNumber(profile.muscleMass) > 0;
+  const fatValue = profile.bodyFatValue ?? profile.bodyFatMass;
+  const hasFat = fatValue !== "" && fatValue !== undefined && toNumber(fatValue) > 0;
+  const inferredMode = hasMuscle && hasFat ? "both" : hasMuscle ? "muscle" : hasFat ? "fat" : "none";
+  const mode = profile.bodyCompositionMode || inferredMode;
+  const showMuscle = mode === "muscle" || mode === "both";
+  const showFat = mode === "fat" || mode === "both";
+
+  const selectMode = (nextMode) => {
+    onProfileChange("bodyCompositionMode", nextMode);
+    if (nextMode === "none") {
+      onProfileChange("muscleMass", "");
+      onProfileChange("bodyFatValue", "");
+      onProfileChange("bodyFatMass", "");
+    }
+    if (nextMode === "muscle") {
+      onProfileChange("bodyFatValue", "");
+      onProfileChange("bodyFatMass", "");
+    }
+    if (nextMode === "fat") {
+      onProfileChange("muscleMass", "");
+    }
+  };
+
   return (
-    <div className="profile-row body-fat-row">
-      <span className="row-icon">지</span>
-      <div className="row-label-stack">
-        <strong>체지방량 <em>(선택)</em></strong>
-        <em>또는 체지방률</em>
+    <section className="daily-calc-section">
+      <div className="section-title">
+        <strong>체성분 <em>(선택)</em></strong>
       </div>
-      <input
-        type="number"
-        value={profile.bodyFatValue ?? profile.bodyFatMass}
-        min="0"
-        max={profile.bodyFatUnit === "percent" ? "70" : "140"}
-        step="0.1"
-        onChange={(event) => onProfileChange("bodyFatValue", event.target.value)}
-      />
-      <select value={profile.bodyFatUnit || "kg"} onChange={(event) => onProfileChange("bodyFatUnit", event.target.value)}>
-        <option value="kg">kg</option>
-        <option value="percent">%</option>
-      </select>
-    </div>
+      <div className="goal-card-group" role="group" aria-label="체성분 입력 방식">
+        {BODY_COMPOSITION_OPTIONS.map((option) => (
+          <button
+            key={option.value}
+            type="button"
+            className={mode === option.value ? "is-selected" : ""}
+            onClick={() => selectMode(option.value)}
+          >
+            <strong>{option.label}</strong>
+          </button>
+        ))}
+      </div>
+
+      {showMuscle && (
+        <NumberField label="골격근량" unit="kg" value={profile.muscleMass} min="0" max="100" step="0.1" onChange={(value) => onProfileChange("muscleMass", value)} />
+      )}
+
+      {showFat && (
+        <div className="profile-row body-fat-row">
+          <span className="row-icon">지</span>
+          <div className="row-label-stack">
+            <strong>체지방량/률</strong>
+            <em>kg 또는 %</em>
+          </div>
+          <input
+            type="number"
+            value={profile.bodyFatValue ?? profile.bodyFatMass}
+            min="0"
+            max={profile.bodyFatUnit === "percent" ? "70" : "140"}
+            step="0.1"
+            onChange={(event) => onProfileChange("bodyFatValue", event.target.value)}
+          />
+          <select value={profile.bodyFatUnit || "kg"} onChange={(event) => onProfileChange("bodyFatUnit", event.target.value)}>
+            <option value="kg">kg</option>
+            <option value="percent">%</option>
+          </select>
+        </div>
+      )}
+    </section>
   );
 }
 
@@ -2840,9 +2883,9 @@ function PlanResultScreen({ plan, onPlanChange, onBack, onStart }) {
   const targetBasisText = plan.isManualTarget
     ? "사용자 지정 목표"
     : plan.goalLabel === "벌크"
-      ? "유지 칼로리 대비 +10%"
+      ? "유지 칼로리 대비 +8%"
       : plan.goalLabel === "감량"
-        ? "유지 칼로리 대비 -15%"
+        ? "유지 칼로리 대비 -17%"
         : "유지 칼로리 기준";
   const targetGuideText = plan.isManualTarget
     ? "수정한 목표가 기록창과 통계창에 반영됩니다."
@@ -3048,10 +3091,10 @@ function PlanResultScreen({ plan, onPlanChange, onBack, onStart }) {
           <strong>상세 정보</strong>
           <small>입력값 기준</small>
         </div>
-        <DetailRow label="체지방률" value={formatMacro(plan.details.bodyFatRate) + " %"} />
-        <DetailRow label="제지방량" value={formatMacro(plan.details.leanMass) + " kg"} />
+        <DetailRow label="체지방률" value={plan.details.bodyFatRate > 0 ? formatMacro(plan.details.bodyFatRate) + " %" : "미입력"} />
+        <DetailRow label="제지방량" value={plan.details.leanMass > 0 ? formatMacro(plan.details.leanMass) + " kg" : "미입력"} />
         <DetailRow label="체중" value={formatMacro(plan.profile.weight) + " kg"} />
-        <DetailRow label="골격근량" value={formatMacro(plan.profile.muscleMass) + " kg"} />
+        <DetailRow label="골격근량" value={plan.profile.muscleMass > 0 ? formatMacro(plan.profile.muscleMass) + " kg" : "미입력"} />
       </section>
 
       <div className="result-actions">
