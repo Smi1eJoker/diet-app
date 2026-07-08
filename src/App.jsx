@@ -47,6 +47,7 @@ import {
   getMacroIntakeStatus,
   getMacroCalorieGap,
   getMacroCalories,
+  isNutritionPlanCurrent,
   maybeApplyAdaptiveCalories,
   getTargetFormValues,
   isRequiredProfileFilled,
@@ -281,12 +282,20 @@ export default function App() {
       .then(([appState, dailyLogState]) => {
         if (!isMounted) return;
 
-        if (appState?.profile && Object.keys(appState.profile).length > 0) {
-          setProfile({ ...DEFAULT_PROFILE, ...appState.profile });
-        }
+        const restoredProfile = appState?.profile && Object.keys(appState.profile).length > 0
+          ? { ...DEFAULT_PROFILE, ...appState.profile }
+          : DEFAULT_PROFILE;
 
-        if (appState?.nutrition_plan && Object.keys(appState.nutrition_plan).length > 0) {
-          setNutritionPlan(appState.nutrition_plan);
+        setProfile(restoredProfile);
+
+        const savedPlan = appState?.nutrition_plan && Object.keys(appState.nutrition_plan).length > 0
+          ? appState.nutrition_plan
+          : null;
+
+        if (savedPlan?.isManualTarget || isNutritionPlanCurrent(savedPlan)) {
+          setNutritionPlan(savedPlan || buildNutritionPlan(restoredProfile));
+        } else {
+          setNutritionPlan(buildNutritionPlan(restoredProfile));
         }
 
         if (appState?.setup_screen) {

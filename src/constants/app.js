@@ -35,9 +35,9 @@ export const FALLBACK_PROFILE = {
 };
 
 export const GOAL_OPTIONS = {
-  lose: { label: "감량", multiplier: 0.85, tone: "calm", helper: "체중 감소" },
+  lose: { label: "감량", multiplier: 0.83, tone: "calm", helper: "체중 감소" },
   maintain: { label: "유지", multiplier: 1, tone: "good", helper: "현재 체중 유지" },
-  bulk: { label: "벌크", multiplier: 1.1, tone: "strong", helper: "체중 증가" },
+  bulk: { label: "벌크", multiplier: 1.08, tone: "strong", helper: "체중 증가" },
 };
 
 export const JOB_ACTIVITY_OPTIONS = [
@@ -52,26 +52,26 @@ export const JOB_ACTIVITY_OPTIONS = [
   {
     value: "light",
     label: "가볍게 움직임",
-    description: "가벼운 이동이 있는 생활, 가벼운 운동 포함",
+    description: "가벼운 이동이 있는 생활",
     stepsLabel: "3,000 ~ 7,000보",
     defaultSteps: 5000,
-    kcal: 120,
+    kcal: 100,
   },
   {
     value: "moderate",
     label: "보통 활동적",
-    description: "일상 이동이 많은 편, 주 3~4회 운동",
+    description: "일상 이동이 많은 편",
     stepsLabel: "7,000 ~ 10,000보",
     defaultSteps: 8500,
-    kcal: 260,
+    kcal: 150,
   },
   {
     value: "high",
     label: "많이 움직임",
-    description: "서서 일하거나 이동이 많고, 주 4~6회 운동",
+    description: "서서 일하거나 이동이 많은 생활",
     stepsLabel: "10,000 ~ 15,000보",
     defaultSteps: 12500,
-    kcal: 420,
+    kcal: 250,
   },
   {
     value: "physical",
@@ -79,7 +79,7 @@ export const JOB_ACTIVITY_OPTIONS = [
     description: "무거운 작업이 포함된 활동, 매우 높은 활동량",
     stepsLabel: "15,000보 이상",
     defaultSteps: 16000,
-    kcal: 620,
+    kcal: 400,
   },
 ];
 
