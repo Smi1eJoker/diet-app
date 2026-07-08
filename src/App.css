@@ -4482,3 +4482,89 @@ textarea,
     font-size: 10.5px;
   }
 }
+
+/* requested update: cleaner food candidate rows in basis-selection modals */
+.nutrition-modal .alias-candidate-list button,
+.alias-candidate-list button {
+  min-height: 58px;
+  display: grid !important;
+  grid-template-columns: minmax(0, 1fr) minmax(148px, auto) !important;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 11px;
+}
+
+.alias-candidate-list .candidate-food-name {
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+  align-content: center;
+}
+
+.alias-candidate-list .candidate-food-name strong {
+  min-width: 0;
+  color: #f5f5f5;
+  font-size: 14px;
+  font-weight: 900;
+  line-height: 1.15;
+  word-break: keep-all;
+  overflow-wrap: anywhere;
+}
+
+.alias-candidate-list .candidate-food-name small {
+  color: #f5f5f5;
+  font-size: 12px;
+  font-weight: 900;
+  line-height: 1.15;
+  word-break: keep-all;
+  overflow-wrap: anywhere;
+}
+
+.alias-candidate-list .candidate-food-nutrients {
+  min-width: 148px;
+  display: grid;
+  gap: 2px;
+  justify-items: end;
+  text-align: right;
+}
+
+.alias-candidate-list .candidate-food-nutrients span {
+  color: #b8b8b8;
+  font-size: 11px;
+  font-weight: 900;
+  line-height: 1.2;
+  white-space: nowrap;
+}
+
+.alias-candidate-list .candidate-food-nutrients span:first-child {
+  color: #f5f5f5;
+}
+
+.alias-candidate-list button.is-current-basis .candidate-food-name strong,
+.alias-candidate-list button.is-current-basis .candidate-food-name small {
+  color: #66e36f;
+}
+
+.compact-modal-empty {
+  margin-top: 2px;
+  padding: 18px 12px;
+}
+
+.chart-range-toggle.has-three-options {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+@media (max-width: 360px) {
+  .nutrition-modal .alias-candidate-list button,
+  .alias-candidate-list button {
+    grid-template-columns: minmax(0, 1fr) minmax(130px, auto) !important;
+  }
+
+  .alias-candidate-list .candidate-food-nutrients {
+    min-width: 130px;
+  }
+
+  .alias-candidate-list .candidate-food-nutrients span {
+    font-size: 10.5px;
+  }
+}

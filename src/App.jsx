@@ -786,6 +786,60 @@ function getChartAnchorDate(records) {
     .at(-1);
 }
 
+function buildHourlyCaloriePoints(meals = []) {
+  const mealPoints = (meals || [])
+    .map((meal, index) => {
+      const time = parseTimeInput(meal.time);
+      if (!time) return null;
+      const [hour, minute] = time.split(":").map(Number);
+      const minutes = hour * 60 + minute;
+      const kcal = calculateTotals([meal]).kcal;
+      if (kcal <= 0) return null;
+
+      return {
+        key: "24h-meal-" + index + "-" + time,
+        label: time,
+        tooltipLabel: time,
+        minutes,
+        kcal,
+      };
+    })
+    .filter(Boolean)
+    .sort((a, b) => a.minutes - b.minutes);
+
+  if (mealPoints.length === 0) return [];
+
+  const points = [{
+    key: "24h-start",
+    label: "00:00",
+    tooltipLabel: "00:00",
+    minutes: 0,
+    kcal: 0,
+  }];
+
+  let cumulativeKcal = 0;
+  mealPoints.forEach((point) => {
+    cumulativeKcal += point.kcal;
+    points.push({
+      ...point,
+      kcal: Math.round(cumulativeKcal),
+    });
+  });
+
+  const lastPoint = points.at(-1);
+  if (!lastPoint || lastPoint.minutes < 1440) {
+    points.push({
+      key: "24h-end",
+      label: "24:00",
+      tooltipLabel: "24:00",
+      minutes: 1440,
+      kcal: Math.round(cumulativeKcal),
+    });
+  }
+
+  return points;
+}
+
 function buildStats(meals, plan, morningWeight, dailyRecords, selectedDate) {
   const totals = calculateTotals(meals);
   const selectedKey = getDateKey(selectedDate);
@@ -813,6 +867,8 @@ function buildStats(meals, plan, morningWeight, dailyRecords, selectedDate) {
   };
 
   const makeCalorieTrend = (range) => {
+    if (range === "24") return buildHourlyCaloriePoints(meals);
+
     const days = range === "30" ? 30 : 7;
     return buildDatePoints(chartAnchorDate, days)
       .map((point) => {
@@ -1772,11 +1828,14 @@ function findFoodForUnitAmount(name, unitText, customFoods, basisFood) {
 }
 
 function parseKoreanQuantity(value) {
-  const text = normalize(value);
-  if (!text) return null;
+  const rawText = String(value || "").trim();
+  if (!rawText) return null;
 
-  const numeric = Number(text);
+  const numeric = Number(rawText);
   if (Number.isFinite(numeric) && numeric > 0) return numeric;
+
+  const text = normalize(rawText);
+  if (!text) return null;
 
   const quantityMap = {
     한: 1,
@@ -2533,6 +2592,7 @@ export default function App() {
   const unitAmountInputRef = useRef(null);
   const foodEditAmountRef = useRef(null);
   const cloudSaveTimerRef = useRef(null);
+  const dateSwipeStartRef = useRef(null);
   const finishDayLongPressProps = useLongPress(() => setActionTarget({ type: "day" }));
 
   useEffect(() => {
@@ -2813,6 +2873,52 @@ export default function App() {
     setDayComplete(Boolean(nextRecord.dayComplete));
     setIsAddingMeal(false);
     setEditingMealId(null);
+  };
+
+  const isDateSwipeIgnoredTarget = (target) => {
+    return Boolean(target?.closest?.(
+      "input, textarea, select, button, a, .modal-backdrop, .sheet-backdrop, .bottom-nav, .weight-line-chart, .my-foods-screen"
+    ));
+  };
+
+  const handleDateSwipeStart = (event) => {
+    if (activeTab === "foods" || calendarOpen || settingsOpen || matchChoiceTarget || actionTarget) {
+      dateSwipeStartRef.current = null;
+      return;
+    }
+
+    if (isDateSwipeIgnoredTarget(event.target)) {
+      dateSwipeStartRef.current = null;
+      return;
+    }
+
+    const touch = event.touches?.[0];
+    if (!touch) return;
+
+    dateSwipeStartRef.current = {
+      x: touch.clientX,
+      y: touch.clientY,
+      time: Date.now(),
+    };
+  };
+
+  const handleDateSwipeEnd = (event) => {
+    const start = dateSwipeStartRef.current;
+    dateSwipeStartRef.current = null;
+    if (!start) return;
+
+    const touch = event.changedTouches?.[0];
+    if (!touch) return;
+
+    const dx = touch.clientX - start.x;
+    const dy = touch.clientY - start.y;
+    const elapsed = Date.now() - start.time;
+
+    if (elapsed > 900) return;
+    if (Math.abs(dx) < 72) return;
+    if (Math.abs(dx) < Math.abs(dy) * 1.35) return;
+
+    moveSelectedDate(dx < 0 ? 1 : -1);
   };
 
   const registerMorningWeight = () => {
@@ -4169,7 +4275,7 @@ export default function App() {
   }
 
   return (
-    <main className="app-shell">
+    <main className="app-shell" onTouchStart={handleDateSwipeStart} onTouchEnd={handleDateSwipeEnd}>
       {activeTab !== "foods" && (
         <section className="top-panel" aria-label="오늘 식단 요약">
         <div className="date-row date-nav-row compact-date-row">
@@ -4549,87 +4655,39 @@ export default function App() {
 
       {nutritionTarget && (
         <Modal title={nutritionTarget.name + " 음식 연결/등록"} onClose={closeNutritionModal} className="nutrition-modal">
-          <form className="modal-form" onSubmit={saveNutrition}>
-            {nutritionCandidateFoods.length > 0 && (
-              <div className="alias-candidate-panel">
-                <div className="alias-candidate-list">
-                  {nutritionCandidateFoods.map((food) => (
+          {nutritionCandidateFoods.length > 0 ? (
+            <div className="alias-candidate-panel">
+              <div className="alias-candidate-list">
+                {nutritionCandidateFoods.map((food) => {
+                  const displayName = getFoodDisplayName(food);
+                  const nameParts = splitMemoPreviewFoodName(displayName);
+
+                  return (
                     <button
                       key={food.id}
                       type="button"
                       className={food.isCurrentBasis ? "is-current-basis" : ""}
                       onClick={() => openNutritionMatchChoice(food)}
                     >
-                      <strong>{getFoodDisplayName(food)}</strong>
-                      <em>100g</em>
-                      <span>
-                        <b>{Math.round(food.kcal)}kcal</b>
-                        <small>C {formatMacro(food.carb)}g P {formatMacro(food.protein)}g F {formatMacro(food.fat)}g</small>
-                      </span>
+                      <div className="candidate-food-name">
+                        <strong>{nameParts.main}</strong>
+                        {nameParts.sub && <small>{nameParts.sub}</small>}
+                      </div>
+                      <div className="candidate-food-nutrients">
+                        <span>100g {formatAmount(toNumber(food.kcal))}kcal</span>
+                        <span>C {formatMacro(food.carb)}g · P {formatMacro(food.protein)}g · F {formatMacro(food.fat)}g</span>
+                      </div>
                     </button>
-                  ))}
-                </div>
-              </div>
-            )}
-            <div className="nutrition-manual-grid">
-              <div className="nutrition-manual-row nutrition-manual-row-two">
-                <label>
-                  <span>기준 중량(g)</span>
-                  <input
-                    value={nutritionForm.baseAmount}
-                    onChange={(event) => setNutritionForm((current) => ({ ...current, baseAmount: event.target.value }))}
-                    type="number"
-                    min="1"
-                    step="1"
-                    placeholder="예: 100"
-                  />
-                </label>
-                <label>
-                  <span>kcal</span>
-                  <input
-                    value={nutritionForm.kcal}
-                    onChange={(event) => setNutritionForm((current) => ({ ...current, kcal: event.target.value }))}
-                    type="number"
-                    min="0"
-                    step="1"
-                  />
-                </label>
-              </div>
-              <div className="nutrition-manual-row nutrition-manual-row-three">
-                <label>
-                  <span>Carb</span>
-                  <input
-                    value={nutritionForm.carb}
-                    onChange={(event) => setNutritionForm((current) => ({ ...current, carb: event.target.value }))}
-                    type="number"
-                    min="0"
-                    step="0.1"
-                  />
-                </label>
-                <label>
-                  <span>Pro</span>
-                  <input
-                    value={nutritionForm.protein}
-                    onChange={(event) => setNutritionForm((current) => ({ ...current, protein: event.target.value }))}
-                    type="number"
-                    min="0"
-                    step="0.1"
-                  />
-                </label>
-                <label>
-                  <span>Fat</span>
-                  <input
-                    value={nutritionForm.fat}
-                    onChange={(event) => setNutritionForm((current) => ({ ...current, fat: event.target.value }))}
-                    type="number"
-                    min="0"
-                    step="0.1"
-                  />
-                </label>
+                  );
+                })}
               </div>
             </div>
-            <ModalActions onCancel={closeNutritionModal} submitText="등록" />
-          </form>
+          ) : (
+            <div className="empty-state compact-modal-empty">
+              <strong>연결할 후보가 없어.</strong>
+              <span>직접 등록은 나의 음식 &gt; 직접 등록에서 추가해.</span>
+            </div>
+          )}
         </Modal>
       )}
 
@@ -4884,7 +4942,7 @@ function LoginScreen({ mode, form, error, message, loading, hasConfig, onModeCha
 }
 
 function StatsScreen({ stats, plan, totals }) {
-  const [calorieRange, setCalorieRange] = useState("7");
+  const [calorieRange, setCalorieRange] = useState("24");
   const [weightRange, setWeightRange] = useState("7");
   const calorieTrend = stats.makeCalorieTrend(calorieRange);
   const weightTrend = stats.makeWeightTrend(weightRange);
@@ -4894,7 +4952,7 @@ function StatsScreen({ stats, plan, totals }) {
       <div className="stats-card weight-chart-card">
         <div className="section-title chart-title-row">
           <strong>일 섭취 칼로리</strong>
-          <ChartRangeToggle value={calorieRange} onChange={setCalorieRange} />
+          <ChartRangeToggle value={calorieRange} onChange={setCalorieRange} options={["24", "7", "30"]} />
         </div>
         <LineChart points={calorieTrend} valueKey="kcal" unit="kcal" emptyText="아직 칼로리 기록이 없어." />
       </div>
@@ -4910,15 +4968,25 @@ function StatsScreen({ stats, plan, totals }) {
   );
 }
 
-function ChartRangeToggle({ value, onChange }) {
+function ChartRangeToggle({ value, onChange, options = ["7", "30"] }) {
+  const labels = {
+    "24": "24시간",
+    "7": "최근 7일",
+    "30": "최근 30일",
+  };
+
   return (
-    <div className="chart-range-toggle" role="group" aria-label="그래프 기간">
-      <button className={value === "7" ? "is-selected" : ""} type="button" onClick={() => onChange("7")}>
-        최근 7일
-      </button>
-      <button className={value === "30" ? "is-selected" : ""} type="button" onClick={() => onChange("30")}>
-        최근 30일
-      </button>
+    <div className={"chart-range-toggle" + (options.length >= 3 ? " has-three-options" : "")} role="group" aria-label="그래프 기간">
+      {options.map((option) => (
+        <button
+          key={option}
+          className={value === option ? "is-selected" : ""}
+          type="button"
+          onClick={() => onChange(option)}
+        >
+          {labels[option] || option}
+        </button>
+      ))}
     </div>
   );
 }
@@ -4935,7 +5003,9 @@ function LineChart({ points, valueKey, unit, emptyText }) {
     return <div className="chart-empty-state">{emptyText}</div>;
   }
 
-  const values = points.map((point) => point[valueKey]).filter((value) => value > 0);
+  const values = points
+    .map((point) => toNumber(point[valueKey]))
+    .filter((value) => Number.isFinite(value));
   const min = values.length ? Math.min(...values) : 0;
   const max = values.length ? Math.max(...values) : 1;
   const range = Math.max(0.1, max - min);
