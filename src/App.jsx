@@ -787,57 +787,36 @@ function getChartAnchorDate(records) {
 }
 
 function buildHourlyCaloriePoints(meals = []) {
-  const mealPoints = (meals || [])
+  let cumulativeKcal = 0;
+
+  return (meals || [])
     .map((meal, index) => {
       const time = parseTimeInput(meal.time);
       if (!time) return null;
+
       const [hour, minute] = time.split(":").map(Number);
       const minutes = hour * 60 + minute;
-      const kcal = calculateTotals([meal]).kcal;
-      if (kcal <= 0) return null;
+      const mealKcal = calculateTotals([meal]).kcal;
+      if (mealKcal <= 0) return null;
 
       return {
         key: "24h-meal-" + index + "-" + time,
         label: time,
         tooltipLabel: time,
         minutes,
-        kcal,
+        xPercent: Math.min(100, Math.max(0, (minutes / 1440) * 100)),
+        mealKcal,
       };
     })
     .filter(Boolean)
-    .sort((a, b) => a.minutes - b.minutes);
-
-  if (mealPoints.length === 0) return [];
-
-  const points = [{
-    key: "24h-start",
-    label: "00:00",
-    tooltipLabel: "00:00",
-    minutes: 0,
-    kcal: 0,
-  }];
-
-  let cumulativeKcal = 0;
-  mealPoints.forEach((point) => {
-    cumulativeKcal += point.kcal;
-    points.push({
-      ...point,
-      kcal: Math.round(cumulativeKcal),
+    .sort((a, b) => a.minutes - b.minutes)
+    .map((point) => {
+      cumulativeKcal += point.mealKcal;
+      return {
+        ...point,
+        kcal: Math.round(cumulativeKcal),
+      };
     });
-  });
-
-  const lastPoint = points.at(-1);
-  if (!lastPoint || lastPoint.minutes < 1440) {
-    points.push({
-      key: "24h-end",
-      label: "24:00",
-      tooltipLabel: "24:00",
-      minutes: 1440,
-      kcal: Math.round(cumulativeKcal),
-    });
-  }
-
-  return points;
 }
 
 function buildStats(meals, plan, morningWeight, dailyRecords, selectedDate) {
@@ -1831,6 +1810,7 @@ function parseKoreanQuantity(value) {
   const rawText = String(value || "").trim();
   if (!rawText) return null;
 
+  // 소수점 수량을 먼저 처리한다. normalize()는 점을 제거하므로 0.5개가 5개로 깨질 수 있다.
   const numeric = Number(rawText);
   if (Number.isFinite(numeric) && numeric > 0) return numeric;
 
@@ -2540,6 +2520,10 @@ export default function App() {
   const [setupScreen, setSetupScreen] = useState("setup");
   const [activeTab, setActiveTab] = useState("record");
   const [selectedDate, setSelectedDate] = useState(() => new Date());
+  const dateSwipeStartRef = useRef(null);
+  const [dateSwipeOffset, setDateSwipeOffset] = useState(0);
+  const [dateSwipeDragging, setDateSwipeDragging] = useState(false);
+  const [dateSwipeSettling, setDateSwipeSettling] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [calendarOpen, setCalendarOpen] = useState(false);
   const [dayComplete, setDayComplete] = useState(false);
@@ -2592,7 +2576,6 @@ export default function App() {
   const unitAmountInputRef = useRef(null);
   const foodEditAmountRef = useRef(null);
   const cloudSaveTimerRef = useRef(null);
-  const dateSwipeStartRef = useRef(null);
   const finishDayLongPressProps = useLongPress(() => setActionTarget({ type: "day" }));
 
   useEffect(() => {
@@ -2877,11 +2860,19 @@ export default function App() {
 
   const isDateSwipeIgnoredTarget = (target) => {
     return Boolean(target?.closest?.(
-      "input, textarea, select, button, a, .modal-backdrop, .sheet-backdrop, .bottom-nav, .weight-line-chart, .my-foods-screen"
+      "input, textarea, select, button, a, .modal-backdrop, .sheet-backdrop, .bottom-nav, .app-footer-actions, .weight-line-chart, .my-foods-screen"
     ));
   };
 
-  const handleDateSwipeStart = (event) => {
+  const resetDateSwipe = () => {
+    dateSwipeStartRef.current = null;
+    setDateSwipeOffset(0);
+    setDateSwipeDragging(false);
+    setDateSwipeSettling(false);
+  };
+
+  const handleDateSwipePointerDown = (event) => {
+    if (event.pointerType === "mouse" && event.button !== 0) return;
     if (activeTab === "foods" || calendarOpen || settingsOpen || matchChoiceTarget || actionTarget) {
       dateSwipeStartRef.current = null;
       return;
@@ -2892,34 +2883,76 @@ export default function App() {
       return;
     }
 
-    const touch = event.touches?.[0];
-    if (!touch) return;
-
     dateSwipeStartRef.current = {
-      x: touch.clientX,
-      y: touch.clientY,
-      time: Date.now(),
+      x: event.clientX,
+      y: event.clientY,
+      isHorizontal: false,
     };
+    setDateSwipeSettling(false);
   };
 
-  const handleDateSwipeEnd = (event) => {
+  const handleDateSwipePointerMove = (event) => {
+    const start = dateSwipeStartRef.current;
+    if (!start) return;
+
+    const dx = event.clientX - start.x;
+    const dy = event.clientY - start.y;
+    const absX = Math.abs(dx);
+    const absY = Math.abs(dy);
+
+    if (!start.isHorizontal) {
+      if (absY > 12 && absY > absX) {
+        resetDateSwipe();
+        return;
+      }
+
+      if (absX < 8) return;
+      start.isHorizontal = true;
+      setDateSwipeDragging(true);
+    }
+
+    const limitedOffset = Math.max(-96, Math.min(96, dx * 0.45));
+    setDateSwipeOffset(limitedOffset);
+  };
+
+  const handleDateSwipePointerEnd = (event) => {
     const start = dateSwipeStartRef.current;
     dateSwipeStartRef.current = null;
     if (!start) return;
 
-    const touch = event.changedTouches?.[0];
-    if (!touch) return;
+    const dx = event.clientX - start.x;
+    const dy = event.clientY - start.y;
+    const shouldMove = start.isHorizontal && Math.abs(dx) >= 64 && Math.abs(dx) > Math.abs(dy) * 1.2;
 
-    const dx = touch.clientX - start.x;
-    const dy = touch.clientY - start.y;
-    const elapsed = Date.now() - start.time;
+    setDateSwipeSettling(true);
 
-    if (elapsed > 900) return;
-    if (Math.abs(dx) < 72) return;
-    if (Math.abs(dx) < Math.abs(dy) * 1.35) return;
+    if (shouldMove) {
+      const direction = dx < 0 ? 1 : -1;
+      setDateSwipeOffset(dx < 0 ? -116 : 116);
+      window.setTimeout(() => {
+        moveSelectedDate(direction);
+        setDateSwipeOffset(0);
+        setDateSwipeDragging(false);
+        window.setTimeout(() => setDateSwipeSettling(false), 180);
+      }, 100);
+      return;
+    }
 
-    moveSelectedDate(dx < 0 ? 1 : -1);
+    setDateSwipeOffset(0);
+    setDateSwipeDragging(false);
+    window.setTimeout(() => setDateSwipeSettling(false), 180);
   };
+
+  const dateSwipeClassName = [
+    "app-shell",
+    activeTab !== "foods" ? "can-date-swipe" : "",
+    dateSwipeDragging ? "is-date-swiping" : "",
+    dateSwipeSettling ? "is-date-settling" : "",
+  ].filter(Boolean).join(" ");
+
+  const dateSwipeStyle = activeTab !== "foods"
+    ? { "--date-swipe-offset": dateSwipeOffset + "px" }
+    : undefined;
 
   const registerMorningWeight = () => {
     const nextWeight = toNumber(morningWeightInput);
@@ -4275,7 +4308,14 @@ export default function App() {
   }
 
   return (
-    <main className="app-shell" onTouchStart={handleDateSwipeStart} onTouchEnd={handleDateSwipeEnd}>
+    <main
+      className={dateSwipeClassName}
+      style={dateSwipeStyle}
+      onPointerDown={handleDateSwipePointerDown}
+      onPointerMove={handleDateSwipePointerMove}
+      onPointerUp={handleDateSwipePointerEnd}
+      onPointerCancel={resetDateSwipe}
+    >
       {activeTab !== "foods" && (
         <section className="top-panel" aria-label="오늘 식단 요약">
         <div className="date-row date-nav-row compact-date-row">
@@ -4655,39 +4695,35 @@ export default function App() {
 
       {nutritionTarget && (
         <Modal title={nutritionTarget.name + " 음식 연결/등록"} onClose={closeNutritionModal} className="nutrition-modal">
-          {nutritionCandidateFoods.length > 0 ? (
-            <div className="alias-candidate-panel">
-              <div className="alias-candidate-list">
-                {nutritionCandidateFoods.map((food) => {
-                  const displayName = getFoodDisplayName(food);
-                  const nameParts = splitMemoPreviewFoodName(displayName);
-
-                  return (
+          <div className="modal-form">
+            {nutritionCandidateFoods.length > 0 && (
+              <div className="alias-candidate-panel">
+                <div className="alias-candidate-list">
+                  {nutritionCandidateFoods.map((food) => (
                     <button
                       key={food.id}
                       type="button"
                       className={food.isCurrentBasis ? "is-current-basis" : ""}
                       onClick={() => openNutritionMatchChoice(food)}
                     >
-                      <div className="candidate-food-name">
-                        <strong>{nameParts.main}</strong>
-                        {nameParts.sub && <small>{nameParts.sub}</small>}
-                      </div>
-                      <div className="candidate-food-nutrients">
-                        <span>100g {formatAmount(toNumber(food.kcal))}kcal</span>
-                        <span>C {formatMacro(food.carb)}g · P {formatMacro(food.protein)}g · F {formatMacro(food.fat)}g</span>
-                      </div>
+                      <strong>{getFoodDisplayName(food)}</strong>
+                      <em>100g</em>
+                      <span>
+                        <b>{Math.round(food.kcal)}kcal</b>
+                        <small>C {formatMacro(food.carb)}g P {formatMacro(food.protein)}g F {formatMacro(food.fat)}g</small>
+                      </span>
                     </button>
-                  );
-                })}
+                  ))}
+                </div>
               </div>
+            )}
+            {nutritionCandidateFoods.length === 0 && (
+              <p className="nutrition-empty-hint">후보가 없으면 나의 음식 &gt; 직접 등록에서 먼저 추가해줘.</p>
+            )}
+            <div className="modal-actions single-action">
+              <button type="button" className="primary-button" onClick={closeNutritionModal}>닫기</button>
             </div>
-          ) : (
-            <div className="empty-state compact-modal-empty">
-              <strong>연결할 후보가 없어.</strong>
-              <span>직접 등록은 나의 음식 &gt; 직접 등록에서 추가해.</span>
-            </div>
-          )}
+          </div>
         </Modal>
       )}
 
@@ -5003,15 +5039,18 @@ function LineChart({ points, valueKey, unit, emptyText }) {
     return <div className="chart-empty-state">{emptyText}</div>;
   }
 
-  const values = points
-    .map((point) => toNumber(point[valueKey]))
-    .filter((value) => Number.isFinite(value));
+  const values = points.map((point) => point[valueKey]).filter((value) => value > 0);
   const min = values.length ? Math.min(...values) : 0;
   const max = values.length ? Math.max(...values) : 1;
   const range = Math.max(0.1, max - min);
 
   const getPointPosition = (point, index) => {
-    const x = points.length === 1 ? 50 : (index / (points.length - 1)) * 100;
+    const hasCustomX = Number.isFinite(Number(point.xPercent));
+    const x = hasCustomX
+      ? Math.min(95, Math.max(5, Number(point.xPercent)))
+      : points.length === 1
+        ? 50
+        : (index / (points.length - 1)) * 100;
     const y = values.length === 1 ? 50 : 86 - ((point[valueKey] - min) / range) * 66;
     return { x, y };
   };
