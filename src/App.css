@@ -77,7 +77,6 @@ button {
 
 .summary-item span,
 .macro-copy span,
-.meal-editor label span,
 .modal-form label span {
   color: #a3a3a3;
   font-size: 12px;
@@ -182,15 +181,9 @@ button {
   background: #ff5a4f;
 }
 
-.meal-tools {
-  padding: 18px 0 10px;
-}
-
-.add-time-button,
 .primary-button,
 .ghost-button,
 .collapse-button,
-.food-actions button,
 .action-sheet button,
 .modal-head button,
 .memo-db-preview button,
@@ -202,30 +195,11 @@ button {
   font-weight: 900;
 }
 
-.add-time-button {
-  width: 100%;
-  height: 48px;
-  font-size: 16px;
-}
-
-.meal-editor {
-  display: grid;
-  gap: 12px;
-  padding: 14px;
-  border: 1px solid #2a2a2a;
-  border-radius: 14px;
-  background: #121212;
-}
-
-.time-label,
-.memo-label,
 .modal-form label {
   display: grid;
   gap: 7px;
 }
 
-.time-label input,
-.memo-label textarea,
 .modal-form input {
   width: 100%;
   border: 1px solid #303030;
@@ -235,27 +209,9 @@ button {
   outline: none;
 }
 
-.time-label input:focus,
-.memo-label textarea:focus,
 .modal-form input:focus {
   border-color: #f5f5f5;
   box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.08);
-}
-
-.time-label input {
-  height: 45px;
-  padding: 0 14px;
-  font-size: 22px;
-  font-weight: 900;
-  letter-spacing: 0;
-}
-
-.memo-label textarea {
-  min-height: 176px;
-  padding: 14px;
-  resize: vertical;
-  line-height: 1.55;
-  font-size: 16px;
 }
 
 .memo-db-preview {
@@ -302,7 +258,6 @@ button {
   font-weight: 800;
 }
 
-.editor-actions,
 .modal-actions {
   display: grid;
   grid-template-columns: 1fr 1fr;
@@ -378,10 +333,6 @@ button {
   line-height: 1.35;
 }
 
-.meal-header .meal-nutrition-summary {
-  color: #66e36f;
-}
-
 .collapse-button {
   min-width: 66px;
   height: 34px;
@@ -427,19 +378,6 @@ button {
 .food-detail {
   margin-top: 5px;
   line-height: 1.35;
-}
-
-.food-actions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  margin-top: 10px;
-}
-
-.food-actions button {
-  min-height: 34px;
-  padding: 0 11px;
-  font-size: 12px;
 }
 
 .modal-backdrop,
@@ -498,12 +436,6 @@ button {
   padding: 0 12px;
 }
 
-.nutrition-grid {
-  display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 8px;
-}
-
 .action-sheet {
   display: grid;
   gap: 8px;
@@ -533,10 +465,6 @@ button {
   .calorie-ring {
     width: 98px;
   }
-
-  .nutrition-grid {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
 }
 
 
@@ -548,7 +476,6 @@ button {
   background: #050505;
 }
 
-.setup-hero,
 .result-hero {
   border: 1px solid #2a2a2a;
   border-radius: 18px;
@@ -556,27 +483,12 @@ button {
   box-shadow: 0 14px 34px rgba(0, 0, 0, 0.5);
 }
 
-.setup-hero {
-  padding: 22px 18px;
-  margin-bottom: 14px;
-}
-
-.setup-hero span,
 .result-hero span {
   color: #a3a3a3;
   font-size: 12px;
   font-weight: 900;
 }
 
-.setup-hero h1 {
-  margin: 8px 0 8px;
-  color: #f5f5f5;
-  font-size: 26px;
-  line-height: 1.15;
-  letter-spacing: 0;
-}
-
-.setup-hero p,
 .result-hero p {
   margin: 0;
   color: #bdbdbd;
@@ -585,7 +497,6 @@ button {
   line-height: 1.55;
 }
 
-.setup-card,
 .result-card {
   display: grid;
   gap: 16px;
@@ -593,15 +504,6 @@ button {
   border: 1px solid #2a2a2a;
   border-radius: 16px;
   background: #121212;
-}
-
-.setup-card {
-  gap: 18px;
-}
-
-.setup-section {
-  display: grid;
-  gap: 12px;
 }
 
 .section-title {
@@ -632,10 +534,6 @@ button {
   background: #181818;
 }
 
-.segmented-control.goal-control {
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-}
-
 .segmented-control button {
   height: 36px;
   border: 0;
@@ -650,23 +548,12 @@ button {
   color: #121212;
 }
 
-.input-grid {
-  display: grid;
-  gap: 10px;
-}
-
-.input-grid.two-col {
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-}
-
-.number-field,
-.select-field {
+.number-field {
   display: grid;
   gap: 6px;
 }
 
-.number-field span,
-.select-field span {
+.number-field span {
   color: #a3a3a3;
   font-size: 12px;
   font-weight: 900;
@@ -684,8 +571,7 @@ button {
   background: #181818;
 }
 
-.number-field input,
-.select-field select {
+.number-field input {
   min-width: 0;
   width: 100%;
   height: 41px;
@@ -700,13 +586,6 @@ button {
   color: #b8b8b8;
   font-size: 12px;
   font-weight: 900;
-}
-
-.select-field select {
-  padding: 0 11px;
-  border: 1px solid #303030;
-  border-radius: 11px;
-  background: #181818;
 }
 
 .setup-submit {
@@ -903,21 +782,7 @@ button {
   gap: 8px;
 }
 
-.plan-chip-button {
-  height: 32px;
-  padding: 0 11px;
-  border: 1px solid #333333;
-  border-radius: 999px;
-  background: #181818;
-  color: #b8b8b8;
-  font-size: 12px;
-  font-weight: 900;
-}
-
 @media (max-width: 360px) {
-  .input-grid.two-col {
-    grid-template-columns: 1fr;
-  }
 
   .macro-result-layout {
     grid-template-columns: 96px minmax(0, 1fr);
@@ -1054,22 +919,6 @@ button {
   font-weight: 900;
 }
 
-.logout-button {
-  position: fixed;
-  left: 50%;
-  bottom: 78px;
-  transform: translateX(-50%);
-  z-index: 15;
-  width: min(calc(100% - 36px), 394px);
-  height: 34px;
-  border: 1px solid #252525;
-  border-radius: 999px;
-  background: rgba(18, 18, 18, 0.92);
-  color: #8f8f8f;
-  font-size: 12px;
-  font-weight: 900;
-}
-
 .bottom-nav {
   position: fixed;
   left: 50%;
@@ -1117,71 +966,6 @@ button {
   padding-top: 18px;
 }
 
-.stats-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 14px;
-  padding: 16px;
-  border: 1px solid #2a2a2a;
-  border-radius: 16px;
-  background: linear-gradient(145deg, #121212, #1a1a1a);
-}
-
-.stats-head div {
-  display: grid;
-  gap: 6px;
-}
-
-.stats-head span {
-  color: #a3a3a3;
-  font-size: 12px;
-  font-weight: 900;
-}
-
-.stats-head strong {
-  color: #f5f5f5;
-  font-size: 30px;
-  line-height: 1;
-  letter-spacing: 0;
-}
-
-.stats-head em {
-  min-width: 78px;
-  padding: 7px 10px;
-  border-radius: 999px;
-  background: #66e36f;
-  color: #121212;
-  font-style: normal;
-  font-size: 12px;
-  font-weight: 900;
-  text-align: center;
-}
-
-.stats-tabs {
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  padding: 4px;
-  border: 1px solid #333333;
-  border-radius: 13px;
-  background: #181818;
-}
-
-.stats-tabs button {
-  height: 34px;
-  border: 0;
-  border-radius: 10px;
-  background: transparent;
-  color: #a3a3a3;
-  font-size: 12px;
-  font-weight: 900;
-}
-
-.stats-tabs button.is-selected {
-  background: #f5f5f5;
-  color: #121212;
-}
-
 .stats-card {
   display: grid;
   gap: 14px;
@@ -1225,53 +1009,6 @@ button {
   display: block;
   height: 100%;
   border-radius: inherit;
-}
-
-.stats-track i.green,
-.stats-track i.mint {
-  background: #66e36f;
-}
-
-.stats-track i.blue {
-  background: #60a5fa;
-}
-
-.stats-track i.orange {
-  background: #f59e0b;
-}
-
-.trend-chart {
-  height: 116px;
-  display: grid;
-  grid-template-columns: repeat(7, minmax(0, 1fr));
-  gap: 8px;
-  align-items: end;
-  padding-top: 8px;
-}
-
-.trend-item {
-  display: grid;
-  gap: 6px;
-  justify-items: center;
-  align-items: end;
-  color: #8f8f8f;
-  font-size: 10px;
-  font-weight: 800;
-}
-
-.trend-item i {
-  width: 100%;
-  max-width: 22px;
-  border-radius: 999px 999px 4px 4px;
-  background: linear-gradient(180deg, #66e36f, #a7f3ae);
-}
-
-.macro-result-layout.compact {
-  grid-template-columns: 94px minmax(0, 1fr);
-}
-
-.macro-result-layout.compact .macro-donut {
-  width: 88px;
 }
 
 
@@ -1522,29 +1259,6 @@ button {
   font-weight: 900;
 }
 
-.activity-mark {
-  width: 36px;
-  height: 36px;
-  border-radius: 12px;
-  background: #333a45;
-}
-
-.activity-mark.light {
-  background: #60a5fa;
-}
-
-.activity-mark.moderate {
-  background: #5de176;
-}
-
-.activity-mark.high {
-  background: #f59e0b;
-}
-
-.activity-mark.physical {
-  background: #ff6b5f;
-}
-
 .precise-steps-field {
   display: grid;
   gap: 8px;
@@ -1657,27 +1371,6 @@ button {
   background: #121212;
 }
 
-.setup-reason-card {
-  display: grid;
-  gap: 12px;
-  margin-top: 16px;
-  padding: 15px;
-  border: 1px solid #2a2a2a;
-  border-radius: 16px;
-  background: #121212;
-}
-
-.setup-reason-card > strong {
-  color: #f5f5f5;
-  font-size: 15px;
-  font-weight: 900;
-}
-
-.setup-reason-card > div {
-  display: grid;
-  gap: 8px;
-}
-
 .mini-info-card {
   display: grid;
   gap: 4px;
@@ -1698,18 +1391,6 @@ button {
   font-size: 12px;
   font-weight: 700;
   line-height: 1.4;
-}
-
-.mini-info-card.green {
-  border-color: rgba(102, 227, 111, 0.32);
-}
-
-.mini-info-card.blue {
-  border-color: rgba(96, 165, 250, 0.32);
-}
-
-.mini-info-card.orange {
-  border-color: rgba(245, 158, 11, 0.36);
 }
 
 @media (max-width: 360px) {
@@ -1847,46 +1528,9 @@ button {
   text-align: center;
 }
 
-.weight-current {
-  position: absolute;
-  top: 10px;
-  right: 10px;
-  display: grid;
-  gap: 2px;
-  padding: 7px 9px;
-  border: 1px solid #2a2a2a;
-  border-radius: 10px;
-  background: rgba(18, 18, 18, 0.92);
-  text-align: right;
-}
-
-.weight-current strong {
-  color: #f5f5f5;
-  font-size: 14px;
-  font-weight: 900;
-}
-
-.weight-current span {
-  color: #a3a3a3;
-  font-size: 10px;
-  font-weight: 900;
-}
-
 
 .date-nav-row {
   grid-template-columns: auto minmax(0, 1fr) auto auto;
-}
-
-.date-nav-button {
-  width: 30px;
-  height: 30px;
-  border: 1px solid #333333;
-  border-radius: 50%;
-  background: #181818;
-  color: #b8b8b8;
-  font-size: 22px;
-  font-weight: 900;
-  line-height: 1;
 }
 
 .date-helper-text {
@@ -1910,25 +1554,6 @@ button {
   background: #252525;
   color: #8f8f8f;
   cursor: default;
-}
-
-.registered-weight-display {
-  display: flex !important;
-  justify-content: space-between;
-  align-items: center;
-  min-height: 44px;
-}
-
-.registered-weight-display strong {
-  color: #f5f5f5;
-  font-size: 22px;
-  font-weight: 900;
-}
-
-.registered-weight-display small {
-  color: #a3a3a3;
-  font-size: 11px;
-  font-weight: 900;
 }
 
 .finish-day-button {
@@ -1962,14 +1587,6 @@ button {
     grid-column: 1 / -1;
     justify-content: flex-end;
   }
-}
-
-
-.add-time-button:disabled {
-  border-color: #2a2a2a;
-  background: #252525;
-  color: #8f8f8f;
-  cursor: default;
 }
 
 .stats-track i.good {
@@ -2258,9 +1875,6 @@ button {
 
 
 /* Goal setup refinements */
-.activity-option .activity-mark {
-  display: none;
-}
 
 .activity-option {
   padding-left: 14px;
@@ -2930,7 +2544,6 @@ body {
 }
 
 .date-label,
-.setup-hero h1,
 .login-card h1,
 .daily-calc-hero h1,
 .result-hero strong,
@@ -2938,9 +2551,7 @@ body {
 .summary-item strong,
 .meal-header strong,
 .food-main strong,
-.registered-weight-display strong,
 .calendar-head strong,
-.stats-head strong,
 .detail-row strong,
 .formula-step strong,
 .macro-legend strong,
@@ -2950,16 +2561,13 @@ body {
 
 .summary-item span,
 .macro-copy span,
-.meal-editor label span,
 .modal-form label span,
 .section-title small,
 .morning-weight-card span,
 .compact-weight-card > span,
 .daily-calc-hero span,
-.setup-hero span,
 .login-kicker,
 .number-field span,
-.select-field span,
 .calendar-weekdays span {
   color: #a3a3a3;
 }
@@ -2995,20 +2603,16 @@ body {
 }
 
 .macro-fill,
-.stats-track i.green,
-.stats-track i.mint,
 .calendar-grid .food-dot,
 .finish-day-button.is-complete {
   background: #66e36f;
 }
 
-.meal-editor,
 .meal-card,
 .daily-memo-card,
 .morning-weight-card,
 .stats-card,
 .result-card,
-.setup-card,
 .macro-result-card,
 .daily-calc-section,
 .calendar-sheet,
@@ -3019,21 +2623,16 @@ body {
   box-shadow: 0 16px 38px rgba(0, 0, 0, 0.34);
 }
 
-.setup-hero,
 .result-hero,
-.login-card,
-.stats-head {
+.login-card {
   border-color: #303030;
   background: linear-gradient(145deg, #171717, #0d0d0d);
   box-shadow: 0 18px 40px rgba(0, 0, 0, 0.44);
 }
 
-.time-label input,
-.memo-label textarea,
 .modal-form input,
 .login-form input,
 .number-field div,
-.select-field select,
 .daily-memo-form textarea,
 .weight-inline-input,
 .morning-weight-card div,
@@ -3054,8 +2653,6 @@ textarea::placeholder {
   color: #777777;
 }
 
-.time-label input:focus,
-.memo-label textarea:focus,
 .modal-form input:focus,
 .daily-memo-form textarea:focus {
   border-color: #f5f5f5;
@@ -3067,7 +2664,6 @@ textarea::placeholder {
 .weight-register-button,
 .finish-day-button,
 .segmented-control button.is-selected,
-.stats-tabs button.is-selected,
 .bottom-nav button.is-active,
 .calendar-grid button.is-selected {
   border-color: #f5f5f5;
@@ -3076,32 +2672,25 @@ textarea::placeholder {
 }
 
 .ghost-button,
-.add-time-button,
 .collapse-button,
-.food-actions button,
 .action-sheet button,
 .modal-head button,
 .auth-switch,
-.plan-chip-button,
 .icon-button,
 .calendar-open-button,
-.calendar-head button,
-.date-nav-button {
+.calendar-head button {
   border-color: #333333;
   background: #121212;
   color: #f5f5f5;
 }
 
 .ghost-button:hover,
-.add-time-button:hover,
 .collapse-button:hover,
-.food-actions button:hover,
 .action-sheet button:hover,
 .memo-db-preview button:hover,
 .icon-button:hover,
 .calendar-open-button:hover,
-.calendar-head button:hover,
-.date-nav-button:hover {
+.calendar-head button:hover {
   border-color: #4a4a4a;
   background: #191919;
 }
@@ -3120,19 +2709,16 @@ textarea::placeholder {
   box-shadow: 0 12px 28px rgba(0, 0, 0, 0.55);
 }
 
-.daily-memo-actions .primary-button,
-.editor-actions .primary-button {
+.daily-memo-actions .primary-button {
   background: #f5f5f5;
   color: #050505;
 }
 
-.daily-memo-actions .ghost-button,
-.editor-actions .ghost-button {
+.daily-memo-actions .ghost-button {
   background: #121212;
   color: #f5f5f5;
 }
 
-.add-time-button:disabled,
 .weight-register-button:disabled,
 .daily-memo-actions button:disabled {
   border-color: #262626;
@@ -3157,8 +2743,6 @@ textarea::placeholder {
 .weight-inline-value small,
 .weight-inline-input small,
 .calendar-grid button.is-muted,
-.stats-tabs button,
-.trend-item,
 .weight-labels {
   color: #a3a3a3;
 }
@@ -3171,25 +2755,17 @@ textarea::placeholder {
   color: #050505;
 }
 
-.segmented-control,
-.stats-tabs {
+.segmented-control {
   border-color: #303030;
   background: #181818;
 }
 
-.segmented-control button,
-.stats-tabs button {
+.segmented-control button {
   color: #a3a3a3;
 }
 
 .result-actions {
   background: linear-gradient(transparent, #050505 28%);
-}
-
-.logout-button {
-  border-color: #2f2f2f;
-  background: rgba(18, 18, 18, 0.94);
-  color: #a3a3a3;
 }
 
 /* requested-fix: cleaner numeric fields and deferred food registration */
@@ -3223,63 +2799,6 @@ input[type="number"]::-webkit-inner-spin-button {
   text-align: right;
 }
 
-.food-register-panel {
-  display: grid;
-  gap: 9px;
-  margin-top: 10px;
-  padding: 10px;
-  border: 1px solid #272727;
-  border-radius: 11px;
-  background: #101010;
-}
-
-.register-copy {
-  display: grid;
-  gap: 3px;
-}
-
-.register-copy strong {
-  color: #f5f5f5;
-  font-size: 12px;
-  font-weight: 900;
-}
-
-.register-copy span {
-  color: #8f8f8f;
-  font-size: 11px;
-  font-weight: 800;
-  line-height: 1.35;
-}
-
-.food-register-panel .food-actions {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 8px;
-  margin-top: 0;
-}
-
-.food-register-panel .food-actions button {
-  min-height: 34px;
-  padding: 0 10px;
-  border: 1px solid #343434;
-  border-radius: 10px;
-  background: #171717;
-  color: #f5f5f5;
-  font-size: 12px;
-  font-weight: 900;
-}
-
-.food-register-panel .food-actions button:first-child {
-  border-color: #f5f5f5;
-  background: #f5f5f5;
-  color: #050505;
-}
-
-.nutrition-manual-grid {
-  display: grid;
-  gap: 8px;
-}
-
 .nutrition-manual-row {
   display: grid;
   gap: 8px;
@@ -3293,20 +2812,6 @@ input[type="number"]::-webkit-inner-spin-button {
   grid-template-columns: repeat(3, minmax(0, 1fr));
 }
 
-@media (max-width: 360px) {
-  .food-register-panel .food-actions {
-    grid-template-columns: 1fr;
-  }
-}
-
-.food-basis {
-  margin-top: 3px;
-  color: #6ee7b7;
-  font-size: 11px;
-  font-weight: 900;
-  line-height: 1.3;
-}
-
 .food-basis-inline {
   margin-left: 5px;
   color: #66e36f;
@@ -3316,10 +2821,6 @@ input[type="number"]::-webkit-inner-spin-button {
 
 .food-main strong .food-basis-inline {
   color: #66e36f;
-}
-
-.food-register-panel .food-actions button:only-child {
-  grid-column: 1 / -1;
 }
 
 
@@ -3427,9 +2928,6 @@ input[type="number"]::-webkit-inner-spin-button {
 
 
 /* Requested color refinements */
-.meal-header .meal-nutrition-summary {
-  color: #66e36f;
-}
 
 .calendar-grid button.is-today strong {
   color: #66e36f;
@@ -3554,11 +3052,9 @@ input[type="number"]::-webkit-inner-spin-button {
 .memo-time-input,
 .memo-food-input,
 .daily-memo-form textarea,
-.memo-label textarea,
 .modal-form input,
 .login-form input,
-.number-field input,
-.select-field select {
+.number-field input {
   font-size: 16px;
 }
 
@@ -3657,7 +3153,6 @@ select {
 .primary-button,
 .ghost-button,
 .collapse-button,
-.food-actions,
 .food-register-actions,
 .memo-db-preview,
 .memo-preview-row,
@@ -4224,31 +3719,8 @@ textarea,
   font-weight: 800;
 }
 
-.my-food-actions {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 8px;
-}
-
-.my-food-actions button {
-  min-height: 34px;
-  border: 1px solid #333333;
-  border-radius: 10px;
-  background: #121212;
-  color: #f5f5f5;
-  font-size: 12px;
-  font-weight: 900;
-}
-
-.my-food-actions .danger-button {
-  border-color: #ff5a4f;
-  color: #ff5a4f;
-}
-
 .my-foods-screen,
-.my-food-card,
-.my-food-actions,
-.my-food-actions button {
+.my-food-card {
   -webkit-user-select: none;
   user-select: none;
   -webkit-touch-callout: none;
@@ -4356,35 +3828,6 @@ textarea,
 
 .my-food-tabs button {
   font-size: 12px;
-}
-
-.my-alias-target {
-  display: grid;
-  grid-template-columns: auto minmax(0, 1fr);
-  gap: 7px;
-  align-items: start;
-  padding: 9px 10px;
-  border: 1px solid #252525;
-  border-radius: 11px;
-  background: #121212;
-  color: #b8b8b8;
-  font-size: 12px;
-  font-weight: 900;
-  line-height: 1.35;
-}
-
-.my-alias-target b {
-  color: #66e36f;
-  font-weight: 900;
-}
-
-.my-alias-target span {
-  min-width: 0;
-  overflow-wrap: anywhere;
-}
-
-.my-food-actions-single {
-  grid-template-columns: 1fr;
 }
 
 @media (max-width: 360px) {
