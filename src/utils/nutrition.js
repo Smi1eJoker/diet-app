@@ -20,9 +20,13 @@ export function clamp(value, min, max) {
 export function getNumericProfile(profile) {
   const weight = clamp(toNumber(profile.weight) || FALLBACK_PROFILE.weight, 30, 200);
   const bodyFatUnit = profile.bodyFatUnit || "kg";
-  const bodyCompositionMode = ["none", "muscle", "fat", "both"].includes(profile.bodyCompositionMode)
+  const inferredBodyCompositionMode = inferBodyCompositionMode(profile);
+  const storedBodyCompositionMode = ["none", "muscle", "fat", "both"].includes(profile.bodyCompositionMode)
     ? profile.bodyCompositionMode
-    : inferBodyCompositionMode(profile);
+    : "";
+  const bodyCompositionMode = storedBodyCompositionMode === "none" && inferredBodyCompositionMode !== "none"
+    ? inferredBodyCompositionMode
+    : storedBodyCompositionMode || inferredBodyCompositionMode;
   const hasFatInput = bodyCompositionMode === "fat" || bodyCompositionMode === "both";
   const hasMuscleInput = bodyCompositionMode === "muscle" || bodyCompositionMode === "both";
   const rawBodyFatValue = hasFatInput ? toNumber(profile.bodyFatValue ?? profile.bodyFatMass) : 0;
@@ -78,12 +82,8 @@ const GOAL_CALORIE_MULTIPLIERS = {
   bulk: 1.08,
 };
 
-export const NUTRITION_PLAN_ALGORITHM_VERSION = 3;
-
 const TEF_RATE = 0.08;
-// BMR은 완전 휴식 대사량이라 실제 유지칼로리에는 기본 생활대사 보정이 필요하다.
-// 단, 걸음/직업/웨이트를 따로 더하므로 보수적으로 BMR의 20%만 반영한다.
-const BASE_LIVING_RATE = 0.2;
+const LIVING_CALORIES = 0;
 
 export function getGoalCalorieMultiplier(goalKey) {
   return GOAL_CALORIE_MULTIPLIERS[goalKey] ?? GOAL_CALORIE_MULTIPLIERS.maintain;
@@ -160,12 +160,6 @@ export function getMacroIntakeStatus(macro, value, target, profileOrWeight) {
   return { tone: "ok", isOver: false, isLow: false, message: "" };
 }
 
-
-export function isNutritionPlanCurrent(plan) {
-  if (!plan || plan.isManualTarget) return true;
-  return toNumber(plan.algorithmVersion) === NUTRITION_PLAN_ALGORITHM_VERSION;
-}
-
 export function buildNutritionPlan(profile) {
   const data = getNumericProfile(profile);
   const goalKey = data.goal || FALLBACK_PROFILE.goal;
@@ -174,7 +168,7 @@ export function buildNutritionPlan(profile) {
   const leanMass = data.bodyFatMass > 0 ? clamp(data.weight - data.bodyFatMass, data.weight * 0.35, data.weight) : 0;
   const bmr = getMifflinBmr(data);
   const effectiveSteps = data.steps > 0 ? data.steps : job.defaultSteps;
-  const livingCalories = Math.round(bmr * BASE_LIVING_RATE);
+  const livingCalories = LIVING_CALORIES;
   const stepCalories = getStepCalories(effectiveSteps);
   const weightCalories = getWeightTrainingCalories(data.weightSessions);
   const cardioCalories = 0;
@@ -188,7 +182,6 @@ export function buildNutritionPlan(profile) {
   const bodyFatRate = data.bodyFatRate;
 
   return {
-    algorithmVersion: NUTRITION_PLAN_ALGORITHM_VERSION,
     profile: data,
     goalKey,
     goalLabel: goal.label,
@@ -344,7 +337,6 @@ export function applyManualTargets(plan, targets) {
 
   return {
     ...plan,
-    algorithmVersion: NUTRITION_PLAN_ALGORITHM_VERSION,
     calorieGoal,
     macroTargets: { carb, protein, fat },
     guide: "직접 수정한 목표가 기록과 통계에 적용됩니다.",

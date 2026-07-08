@@ -47,7 +47,6 @@ import {
   getMacroIntakeStatus,
   getMacroCalorieGap,
   getMacroCalories,
-  isNutritionPlanCurrent,
   maybeApplyAdaptiveCalories,
   getTargetFormValues,
   isRequiredProfileFilled,
@@ -282,20 +281,12 @@ export default function App() {
       .then(([appState, dailyLogState]) => {
         if (!isMounted) return;
 
-        const restoredProfile = appState?.profile && Object.keys(appState.profile).length > 0
-          ? { ...DEFAULT_PROFILE, ...appState.profile }
-          : DEFAULT_PROFILE;
+        if (appState?.profile && Object.keys(appState.profile).length > 0) {
+          setProfile({ ...DEFAULT_PROFILE, ...appState.profile });
+        }
 
-        setProfile(restoredProfile);
-
-        const savedPlan = appState?.nutrition_plan && Object.keys(appState.nutrition_plan).length > 0
-          ? appState.nutrition_plan
-          : null;
-
-        if (savedPlan?.isManualTarget || isNutritionPlanCurrent(savedPlan)) {
-          setNutritionPlan(savedPlan || buildNutritionPlan(restoredProfile));
-        } else {
-          setNutritionPlan(buildNutritionPlan(restoredProfile));
+        if (appState?.nutrition_plan && Object.keys(appState.nutrition_plan).length > 0) {
+          setNutritionPlan(appState.nutrition_plan);
         }
 
         if (appState?.setup_screen) {
@@ -2599,13 +2590,6 @@ function BottomNav({ activeTab, onChange }) {
   );
 }
 
-const BODY_COMPOSITION_OPTIONS = [
-  { value: "none", label: "입력 안 함" },
-  { value: "muscle", label: "골격근량" },
-  { value: "fat", label: "체지방량/체지방률" },
-  { value: "both", label: "둘 다 입력" },
-];
-
 function SetupScreen({ profile, onProfileChange, onSubmit }) {
   const canCalculate = isRequiredProfileFilled(profile);
 
@@ -2764,73 +2748,66 @@ function NumberField({ label, unit, value, min, max, step = "1", onChange }) {
 }
 
 function BodyCompositionField({ profile, onProfileChange }) {
-  const hasMuscle = profile.muscleMass !== "" && profile.muscleMass !== undefined && toNumber(profile.muscleMass) > 0;
-  const fatValue = profile.bodyFatValue ?? profile.bodyFatMass;
-  const hasFat = fatValue !== "" && fatValue !== undefined && toNumber(fatValue) > 0;
-  const inferredMode = hasMuscle && hasFat ? "both" : hasMuscle ? "muscle" : hasFat ? "fat" : "none";
-  const mode = profile.bodyCompositionMode || inferredMode;
-  const showMuscle = mode === "muscle" || mode === "both";
-  const showFat = mode === "fat" || mode === "both";
+  const bodyFatInputValue = profile.bodyFatValue !== undefined && profile.bodyFatValue !== null
+    ? profile.bodyFatValue
+    : profile.bodyFatMass || "";
 
-  const selectMode = (nextMode) => {
-    onProfileChange("bodyCompositionMode", nextMode);
-    if (nextMode === "none") {
-      onProfileChange("muscleMass", "");
-      onProfileChange("bodyFatValue", "");
-      onProfileChange("bodyFatMass", "");
-    }
-    if (nextMode === "muscle") {
-      onProfileChange("bodyFatValue", "");
-      onProfileChange("bodyFatMass", "");
-    }
-    if (nextMode === "fat") {
-      onProfileChange("muscleMass", "");
-    }
+  const getBodyCompositionMode = (muscleMass, bodyFatValue) => {
+    const hasMuscle = muscleMass !== "" && muscleMass !== undefined && toNumber(muscleMass) > 0;
+    const hasFat = bodyFatValue !== "" && bodyFatValue !== undefined && toNumber(bodyFatValue) > 0;
+
+    if (hasMuscle && hasFat) return "both";
+    if (hasMuscle) return "muscle";
+    if (hasFat) return "fat";
+    return "none";
+  };
+
+  const updateMuscleMass = (value) => {
+    onProfileChange("muscleMass", value);
+    onProfileChange("bodyCompositionMode", getBodyCompositionMode(value, bodyFatInputValue));
+  };
+
+  const updateBodyFatValue = (value) => {
+    onProfileChange("bodyFatValue", value);
+    onProfileChange("bodyCompositionMode", getBodyCompositionMode(profile.muscleMass, value));
   };
 
   return (
-    <section className="daily-calc-section">
+    <section className="body-composition-section">
       <div className="section-title">
         <strong>체성분 <em>(선택)</em></strong>
       </div>
-      <div className="goal-card-group" role="group" aria-label="체성분 입력 방식">
-        {BODY_COMPOSITION_OPTIONS.map((option) => (
-          <button
-            key={option.value}
-            type="button"
-            className={mode === option.value ? "is-selected" : ""}
-            onClick={() => selectMode(option.value)}
-          >
-            <strong>{option.label}</strong>
-          </button>
-        ))}
-      </div>
 
-      {showMuscle && (
-        <NumberField label="골격근량" unit="kg" value={profile.muscleMass} min="0" max="100" step="0.1" onChange={(value) => onProfileChange("muscleMass", value)} />
-      )}
-
-      {showFat && (
-        <div className="profile-row body-fat-row">
-          <span className="row-icon">지</span>
-          <div className="row-label-stack">
-            <strong>체지방량/률</strong>
-            <em>kg 또는 %</em>
-          </div>
+      <div className="body-composition-card">
+        <div className="body-composition-row">
+          <strong>골격근량</strong>
           <input
             type="number"
-            value={profile.bodyFatValue ?? profile.bodyFatMass}
+            value={profile.muscleMass || ""}
+            min="0"
+            max="100"
+            step="0.1"
+            onChange={(event) => updateMuscleMass(event.target.value)}
+          />
+          <small>kg</small>
+        </div>
+
+        <div className="body-composition-row body-composition-fat-row">
+          <strong>체지방</strong>
+          <input
+            type="number"
+            value={bodyFatInputValue || ""}
             min="0"
             max={profile.bodyFatUnit === "percent" ? "70" : "140"}
             step="0.1"
-            onChange={(event) => onProfileChange("bodyFatValue", event.target.value)}
+            onChange={(event) => updateBodyFatValue(event.target.value)}
           />
           <select value={profile.bodyFatUnit || "kg"} onChange={(event) => onProfileChange("bodyFatUnit", event.target.value)}>
             <option value="kg">kg</option>
             <option value="percent">%</option>
           </select>
         </div>
-      )}
+      </div>
     </section>
   );
 }
