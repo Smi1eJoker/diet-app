@@ -52,31 +52,44 @@ export function getMifflinBmr(data) {
   return Math.round(data.sex === "female" ? base - 161 : base + 5);
 }
 
+const GOAL_CALORIE_MULTIPLIERS = {
+  lose: 0.83,
+  maintain: 1,
+  bulk: 1.08,
+};
+
+const TEF_RATE = 0.08;
+const LIVING_CALORIES = 0;
+
+export function getGoalCalorieMultiplier(goalKey) {
+  return GOAL_CALORIE_MULTIPLIERS[goalKey] ?? GOAL_CALORIE_MULTIPLIERS.maintain;
+}
+
 export function getStepCalories(steps) {
   const value = toNumber(steps);
   if (value <= 3000) return 0;
-  if (value <= 5000) return 100;
-  if (value <= 8000) return 200;
-  if (value <= 10000) return 300;
-  return 400;
+  if (value <= 5000) return 200;
+  if (value <= 8000) return 400;
+  if (value <= 10000) return 450;
+  return 550;
 }
 
 export function getWeightTrainingCalories(sessions) {
   const value = toNumber(sessions);
   if (value <= 0) return 0;
-  if (value <= 2) return 70;
-  if (value <= 4) return 120;
-  if (value <= 6) return 180;
-  return 220;
+  if (value <= 2) return 140;
+  if (value <= 4) return 260;
+  if (value <= 6) return 360;
+  return 430;
 }
 
 export function getJobCalories(jobActivity) {
   const caloriesByJob = {
     sedentary: 0,
-    light: 100,
-    moderate: 150,
-    high: 200,
-    physical: 300,
+    light: 150,
+    moderate: 280,
+    high: 420,
+    physical: 600,
   };
 
   return caloriesByJob[jobActivity] ?? caloriesByJob.light;
@@ -88,8 +101,8 @@ export function getCardioCalories(data) {
 }
 
 export function buildMacroTargets(calorieGoal, data, goalKey) {
-  const proteinMultiplier = goalKey === "lose" ? 2.1 : 2.0;
-  const fatMultiplier = goalKey === "lose" ? 0.8 : 1.0;
+  const proteinMultiplier = 2.0;
+  const fatMultiplier = goalKey === "lose" ? 0.9 : 1.0;
   const protein = Math.max(0, Math.round(data.weight * proteinMultiplier));
   const fat = Math.max(0, Math.round(data.weight * fatMultiplier));
   const proteinKcal = protein * MACRO_CALORIE_FACTORS.protein;
@@ -97,6 +110,40 @@ export function buildMacroTargets(calorieGoal, data, goalKey) {
   const carb = Math.max(0, Math.round((calorieGoal - proteinKcal - fatKcal) / MACRO_CALORIE_FACTORS.carb));
 
   return { carb, protein, fat };
+}
+
+export function getMacroIntakeStatus(macro, value, target, profileOrWeight) {
+  const amount = Math.max(0, toNumber(value));
+  const targetValue = Math.max(0, toNumber(target));
+  const weight = Math.max(0, toNumber(profileOrWeight?.weight ?? profileOrWeight));
+
+  if (macro === "protein") {
+    const excessiveProtein = weight > 0 ? weight * 2.5 : targetValue * 1.2;
+    if (excessiveProtein > 0 && amount > excessiveProtein) {
+      return {
+        tone: "warning",
+        isOver: true,
+        isLow: false,
+        message: "단백질이 체중 대비 과도하게 높아요. 하루 총량을 조금 조절해보세요.",
+      };
+    }
+    return { tone: "ok", isOver: false, isLow: false, message: "" };
+  }
+
+  if (macro === "fat" && amount > 0 && targetValue > 0 && amount <= targetValue * 0.6) {
+    return {
+      tone: "warning",
+      isOver: false,
+      isLow: true,
+      message: "지방이 부족합니다. 계란, 견과류, 닭다리살, 목살 등을 추가해보세요.",
+    };
+  }
+
+  if (targetValue > 0 && amount > targetValue) {
+    return { tone: "warning", isOver: true, isLow: false, message: "" };
+  }
+
+  return { tone: "ok", isOver: false, isLow: false, message: "" };
 }
 
 export function buildNutritionPlan(profile) {
@@ -107,16 +154,16 @@ export function buildNutritionPlan(profile) {
   const leanMass = clamp(data.weight - data.bodyFatMass, data.weight * 0.35, data.weight);
   const bmr = getMifflinBmr(data);
   const effectiveSteps = data.steps > 0 ? data.steps : job.defaultSteps;
-  const livingCalories = Math.round(bmr * 0.2);
+  const livingCalories = LIVING_CALORIES;
   const stepCalories = getStepCalories(effectiveSteps);
   const weightCalories = getWeightTrainingCalories(data.weightSessions);
   const cardioCalories = getCardioCalories(data);
   const jobCalories = getJobCalories(data.jobActivity || FALLBACK_PROFILE.jobActivity);
-  const activityCalories = livingCalories + stepCalories + weightCalories + cardioCalories + jobCalories;
+  const activityCalories = stepCalories + weightCalories + cardioCalories + jobCalories;
   const subtotal = bmr + activityCalories;
-  const tef = Math.round(subtotal * 0.08);
+  const tef = Math.round(subtotal * TEF_RATE);
   const tdee = Math.round(subtotal + tef);
-  const calorieGoal = Math.round((tdee * goal.multiplier) / 10) * 10;
+  const calorieGoal = Math.round((tdee * getGoalCalorieMultiplier(goalKey)) / 10) * 10;
   const macroTargets = buildMacroTargets(calorieGoal, data, goalKey);
   const bodyFatRate = data.bodyFatRate;
 
@@ -139,6 +186,7 @@ export function buildNutritionPlan(profile) {
       jobCalories,
       effectiveSteps,
       activityCalories,
+      estimatedTdeeBeforeTef: subtotal,
       tef,
       tdee,
     },

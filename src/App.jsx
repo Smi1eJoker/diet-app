@@ -44,6 +44,7 @@ import {
   formatMacro,
   getActivityBySteps,
   getGapTone,
+  getMacroIntakeStatus,
   getMacroCalorieGap,
   getMacroCalories,
   maybeApplyAdaptiveCalories,
@@ -1945,9 +1946,9 @@ export default function App() {
           </div>
 
           <div className="macro-list">
-            <MacroBar label="탄수화물" value={totals.carb} target={macroTargets.carb} />
-            <MacroBar label="단백질" value={totals.protein} target={macroTargets.protein} />
-            <MacroBar label="지방" value={totals.fat} target={macroTargets.fat} />
+            <MacroBar label="탄수화물" macro="carb" value={totals.carb} target={macroTargets.carb} profile={activePlan.profile} />
+            <MacroBar label="단백질" macro="protein" value={totals.protein} target={macroTargets.protein} profile={activePlan.profile} />
+            <MacroBar label="지방" macro="fat" value={totals.fat} target={macroTargets.fat} profile={activePlan.profile} />
           </div>
         </div>
         </section>
@@ -3031,7 +3032,7 @@ function PlanResultScreen({ plan, onPlanChange, onBack, onStart }) {
       <section className="result-card">
         <div className="section-title">
           <strong>계산 구조</strong>
-          <small>Katch-McArdle 기반</small>
+          <small>Mifflin-St Jeor 기반</small>
         </div>
         <div className="formula-flow">
           <FormulaStep number="1" title="기초대사량(BMR)" value={plan.details.bmr + " kcal"} />
@@ -3112,9 +3113,9 @@ function SummaryItem({ label, value, highlight }) {
   );
 }
 
-function MacroBar({ label, value, target }) {
-  const percent = Math.min(100, Math.round((value / target) * 100));
-  const isOver = value > target;
+function MacroBar({ label, macro, value, target, profile }) {
+  const percent = target > 0 ? Math.min(100, Math.round((value / target) * 100)) : 0;
+  const status = getMacroIntakeStatus(macro, value, target, profile);
 
   return (
     <div className="macro-row">
@@ -3124,8 +3125,9 @@ function MacroBar({ label, value, target }) {
           {formatMacro(value)}/{target}g
         </strong>
       </div>
+      {status.message && <small className="form-error">{status.message}</small>}
       <div className="macro-track">
-        <div className={isOver ? "macro-fill is-over" : "macro-fill"} style={{ width: percent + "%" }} />
+        <div className={status.isOver ? "macro-fill is-over" : "macro-fill"} style={{ width: percent + "%" }} />
       </div>
     </div>
   );
