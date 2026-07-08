@@ -313,7 +313,6 @@ export function isRequiredProfileFilled(profile) {
       toNumber(profile.weight) > 0 &&
       profile.jobActivity &&
       profile.goal &&
-      toNumber(profile.steps) > 0 &&
       profile.weightSessions !== "" &&
       profile.weightSessions !== undefined
   );

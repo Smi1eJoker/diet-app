@@ -2678,22 +2678,25 @@ function SetupScreen({ profile, onProfileChange, onSubmit }) {
             ))}
           </div>
 
-          <label className="precise-steps-field">
-            <span>평균 걸음 수 <em>(필수)</em></span>
-            <div>
-              <input
-                type="number"
-                value={profile.steps || ""}
-                min="0"
-                max="40000"
-                step="1"
-                onChange={(event) => handleStepsChange(event.target.value)}
-              />
-              <small>보/일</small>
-            </div>
-          </label>
+          <SetupInlineNumberField
+            label="평균 걸음 수"
+            meta="선택"
+            unit="보/일"
+            value={profile.steps}
+            min="0"
+            max="40000"
+            step="1"
+            onChange={handleStepsChange}
+          />
 
-          <NumberField label="웨이트 주 횟수" unit="회/주" value={profile.weightSessions} min="0" max="14" onChange={(value) => onProfileChange("weightSessions", value)} />
+          <SetupInlineNumberField
+            label="웨이트 주 횟수"
+            unit="회/주"
+            value={profile.weightSessions}
+            min="0"
+            max="14"
+            onChange={(value) => onProfileChange("weightSessions", value)}
+          />
         </section>
 
         <section className="daily-calc-section">
@@ -2717,7 +2720,7 @@ function SetupScreen({ profile, onProfileChange, onSubmit }) {
           </div>
         </section>
 
-        {!canCalculate && <p className="setup-required-hint">성별, 나이, 키, 체중, 목표, 평균 걸음 수, 웨이트 횟수, 직업 활동량을 입력하면 계산할 수 있어요.</p>}
+        {!canCalculate && <p className="setup-required-hint">성별, 나이, 키, 체중, 목표, 웨이트 횟수, 직업 활동량을 입력하면 계산할 수 있어요.</p>}
 
         <button className="setup-submit" type="submit" disabled={!canCalculate}>
           계산하기
@@ -2733,6 +2736,28 @@ function NumberField({ label, unit, value, min, max, step = "1", onChange }) {
     <label className="number-field">
       <span>{label}</span>
       <div>
+        <input
+          type="number"
+          value={value || ""}
+          min={min}
+          max={max}
+          step={step}
+          onChange={(event) => onChange(event.target.value)}
+        />
+        <small>{unit}</small>
+      </div>
+    </label>
+  );
+}
+
+function SetupInlineNumberField({ label, meta, unit, value, min, max, step = "1", onChange }) {
+  return (
+    <label className="setup-inline-field">
+      <strong>
+        {label}
+        {meta && <em>({meta})</em>}
+      </strong>
+      <div className="setup-inline-control">
         <input
           type="number"
           value={value || ""}
@@ -2781,31 +2806,35 @@ function BodyCompositionField({ profile, onProfileChange }) {
       <div className="body-composition-card">
         <div className="body-composition-row">
           <strong>골격근량</strong>
-          <input
-            type="number"
-            value={profile.muscleMass || ""}
-            min="0"
-            max="100"
-            step="0.1"
-            onChange={(event) => updateMuscleMass(event.target.value)}
-          />
-          <small>kg</small>
+          <div className="body-composition-control">
+            <input
+              type="number"
+              value={profile.muscleMass || ""}
+              min="0"
+              max="100"
+              step="0.1"
+              onChange={(event) => updateMuscleMass(event.target.value)}
+            />
+            <small>kg</small>
+          </div>
         </div>
 
         <div className="body-composition-row body-composition-fat-row">
           <strong>체지방</strong>
-          <input
-            type="number"
-            value={bodyFatInputValue || ""}
-            min="0"
-            max={profile.bodyFatUnit === "percent" ? "70" : "140"}
-            step="0.1"
-            onChange={(event) => updateBodyFatValue(event.target.value)}
-          />
-          <select value={profile.bodyFatUnit || "kg"} onChange={(event) => onProfileChange("bodyFatUnit", event.target.value)}>
-            <option value="kg">kg</option>
-            <option value="percent">%</option>
-          </select>
+          <div className="body-composition-control body-composition-fat-control">
+            <input
+              type="number"
+              value={bodyFatInputValue || ""}
+              min="0"
+              max={profile.bodyFatUnit === "percent" ? "70" : "140"}
+              step="0.1"
+              onChange={(event) => updateBodyFatValue(event.target.value)}
+            />
+            <select value={profile.bodyFatUnit || "kg"} onChange={(event) => onProfileChange("bodyFatUnit", event.target.value)}>
+              <option value="kg">kg</option>
+              <option value="percent">%</option>
+            </select>
+          </div>
         </div>
       </div>
     </section>
