@@ -47,51 +47,200 @@ export function getNumericProfile(profile) {
   };
 }
 
+export function getMifflinBmr(data) {
+  const base = 10 * data.weight + 6.25 * data.height - 5 * data.age;
+  return Math.round(data.sex === "female" ? base - 161 : base + 5);
+}
+
+export function getStepCalories(steps) {
+  const value = toNumber(steps);
+  if (value <= 3000) return 0;
+  if (value <= 5000) return 100;
+  if (value <= 8000) return 200;
+  if (value <= 10000) return 300;
+  return 400;
+}
+
+export function getWeightTrainingCalories(sessions) {
+  const value = toNumber(sessions);
+  if (value <= 0) return 0;
+  if (value <= 2) return 70;
+  if (value <= 4) return 120;
+  if (value <= 6) return 180;
+  return 220;
+}
+
+export function getJobCalories(jobActivity) {
+  const caloriesByJob = {
+    sedentary: 0,
+    light: 100,
+    moderate: 150,
+    high: 200,
+    physical: 300,
+  };
+
+  return caloriesByJob[jobActivity] ?? caloriesByJob.light;
+}
+
+export function getCardioCalories(data) {
+  const weeklyCardioHours = (toNumber(data.cardioSessions) * toNumber(data.cardioMinutes)) / 60;
+  return Math.round((data.weight * 7 * weeklyCardioHours) / 7);
+}
+
+export function buildMacroTargets(calorieGoal, data, goalKey) {
+  const proteinMultiplier = goalKey === "lose" ? 2.1 : 2.0;
+  const fatMultiplier = goalKey === "lose" ? 0.8 : 1.0;
+  const protein = Math.max(0, Math.round(data.weight * proteinMultiplier));
+  const fat = Math.max(0, Math.round(data.weight * fatMultiplier));
+  const proteinKcal = protein * MACRO_CALORIE_FACTORS.protein;
+  const fatKcal = fat * MACRO_CALORIE_FACTORS.fat;
+  const carb = Math.max(0, Math.round((calorieGoal - proteinKcal - fatKcal) / MACRO_CALORIE_FACTORS.carb));
+
+  return { carb, protein, fat };
+}
+
 export function buildNutritionPlan(profile) {
   const data = getNumericProfile(profile);
-  const goal = GOAL_OPTIONS[data.goal || FALLBACK_PROFILE.goal] || GOAL_OPTIONS.maintain;
+  const goalKey = data.goal || FALLBACK_PROFILE.goal;
+  const goal = GOAL_OPTIONS[goalKey] || GOAL_OPTIONS.maintain;
   const job = JOB_ACTIVITY_OPTIONS.find((option) => option.value === (data.jobActivity || FALLBACK_PROFILE.jobActivity)) || JOB_ACTIVITY_OPTIONS[1];
   const leanMass = clamp(data.weight - data.bodyFatMass, data.weight * 0.35, data.weight);
-  const bmr = Math.round(370 + 21.6 * leanMass);
+  const bmr = getMifflinBmr(data);
   const effectiveSteps = data.steps > 0 ? data.steps : job.defaultSteps;
-  const stepCalories = Math.round(effectiveSteps * data.weight * 0.0005);
-  const weightCalories = Math.round((data.weight * 5 * 0.75 * data.weightSessions) / 7);
-  const cardioCalories = Math.round((data.weight * 7 * (data.cardioSessions * data.cardioMinutes / 60)) / 7);
-  const activityCalories = stepCalories + weightCalories + cardioCalories + job.kcal;
-  const tef = Math.round((bmr + activityCalories) * 0.1);
-  const tdee = Math.round(bmr + activityCalories + tef);
+  const livingCalories = Math.round(bmr * 0.2);
+  const stepCalories = getStepCalories(effectiveSteps);
+  const weightCalories = getWeightTrainingCalories(data.weightSessions);
+  const cardioCalories = getCardioCalories(data);
+  const jobCalories = getJobCalories(data.jobActivity || FALLBACK_PROFILE.jobActivity);
+  const activityCalories = livingCalories + stepCalories + weightCalories + cardioCalories + jobCalories;
+  const subtotal = bmr + activityCalories;
+  const tef = Math.round(subtotal * 0.08);
+  const tdee = Math.round(subtotal + tef);
   const calorieGoal = Math.round((tdee * goal.multiplier) / 10) * 10;
-  const protein = Math.round(data.weight * 1.9);
-  const fat = Math.max(35, Math.round((calorieGoal * 0.22) / 9));
-  const carb = Math.max(0, Math.round((calorieGoal - protein * 4 - fat * 9) / 4));
+  const macroTargets = buildMacroTargets(calorieGoal, data, goalKey);
   const bodyFatRate = data.bodyFatRate;
 
   return {
     profile: data,
-    goalKey: data.goal || FALLBACK_PROFILE.goal,
+    goalKey,
     goalLabel: goal.label,
     calorieGoal,
-    macroTargets: { carb, protein, fat },
+    baseCalorieGoal: calorieGoal,
+    adjustmentKcal: 0,
+    macroTargets,
     details: {
       bmr,
       leanMass,
       bodyFatRate,
+      livingCalories,
       stepCalories,
       weightCalories,
       cardioCalories,
-      jobCalories: job.kcal,
+      jobCalories,
       effectiveSteps,
       activityCalories,
       tef,
       tdee,
     },
+    adaptive: {
+      status: "idle",
+      message: "공복 체중 기록이 쌓이면 목표 칼로리를 자동으로 점검합니다.",
+    },
+    adjustmentHistory: [],
+    lastAdjustmentEndKey: "",
     guide:
-      goal.label === "벌크"
-        ? "2주 평균 체중 변화를 보고 목표를 조절하세요."
-        : goal.label === "감량"
-          ? "컨디션이 떨어지면 5% 단위로 목표를 조절하세요."
-          : "운동량이 바뀌면 목표를 다시 계산하세요.",
+      goalKey === "bulk"
+        ? "7일 평균 체중 증가 속도를 보고 목표 칼로리를 자동 보정합니다."
+        : goalKey === "lose"
+          ? "7일 평균 체중 감소 속도를 보고 목표 칼로리를 자동 보정합니다."
+          : "7일 평균 체중이 유지 범위를 벗어나면 목표 칼로리를 자동 보정합니다.",
   };
+}
+
+function getLocalDateKey(date) {
+  const target = new Date(date);
+  const year = target.getFullYear();
+  const month = String(target.getMonth() + 1).padStart(2, "0");
+  const day = String(target.getDate()).padStart(2, "0");
+  return year + "-" + month + "-" + day;
+}
+
+function addLocalDays(date, amount) {
+  const nextDate = new Date(date);
+  nextDate.setDate(nextDate.getDate() + amount);
+  return nextDate;
+}
+
+function getWeightSamples(dailyRecords, endDate, startOffset, endOffset) {
+  const samples = [];
+  for (let offset = startOffset; offset <= endOffset; offset += 1) {
+    const date = addLocalDays(endDate, offset);
+    const key = getLocalDateKey(date);
+    const morningWeight = toNumber(dailyRecords?.[key]?.morningWeight);
+    if (morningWeight > 0) samples.push({ key, weight: morningWeight });
+  }
+  return samples;
+}
+
+function averageWeight(samples) {
+  if (!samples.length) return 0;
+  return samples.reduce((sum, sample) => sum + sample.weight, 0) / samples.length;
+}
+
+function getAdaptiveDecision(goalKey, weeklyChangePercent) {
+  if (goalKey === "bulk") {
+    if (weeklyChangePercent < 0.25) return { calorieDelta: 150, status: "increase", message: "증가 속도가 목표보다 느려 다음 목표 칼로리를 150kcal 올렸습니다." };
+    if (weeklyChangePercent > 0.5) return { calorieDelta: -150, status: "decrease", message: "증가 속도가 목표보다 빨라 다음 목표 칼로리를 150kcal 낮췄습니다." };
+    return { calorieDelta: 0, status: "keep", message: "증가 속도가 목표 범위 안에 있어 목표 칼로리를 유지합니다." };
+  }
+  if (goalKey === "lose") {
+    if (weeklyChangePercent > -0.5) return { calorieDelta: -150, status: "decrease", message: "감소 속도가 목표보다 느려 다음 목표 칼로리를 150kcal 낮췄습니다." };
+    if (weeklyChangePercent < -1) return { calorieDelta: 150, status: "increase", message: "감소 속도가 목표보다 빨라 다음 목표 칼로리를 150kcal 올렸습니다." };
+    return { calorieDelta: 0, status: "keep", message: "감소 속도가 목표 범위 안에 있어 목표 칼로리를 유지합니다." };
+  }
+  if (weeklyChangePercent > 0.25) return { calorieDelta: -100, status: "decrease", message: "유지 목표보다 체중이 늘어 다음 목표 칼로리를 100kcal 낮췄습니다." };
+  if (weeklyChangePercent < -0.25) return { calorieDelta: 100, status: "increase", message: "유지 목표보다 체중이 줄어 다음 목표 칼로리를 100kcal 올렸습니다." };
+  return { calorieDelta: 0, status: "keep", message: "체중 변화가 유지 범위 안에 있어 목표 칼로리를 유지합니다." };
+}
+
+export function getAdaptiveCalorieCheck(plan, dailyRecords, selectedDate) {
+  const goalKey = plan?.goalKey || plan?.profile?.goal || FALLBACK_PROFILE.goal;
+  const endDate = selectedDate ? new Date(selectedDate) : new Date();
+  const endKey = getLocalDateKey(endDate);
+  if (!plan) return { status: "missing-plan", message: "목표 정보가 없어 자동 보정을 건너뜁니다.", calorieDelta: 0, endKey };
+  if (plan.isManualTarget) return { status: "manual", message: "수동으로 수정한 목표라 자동 보정을 건너뜁니다.", calorieDelta: 0, endKey };
+  const recentSamples = getWeightSamples(dailyRecords, endDate, -6, 0);
+  const previousSamples = getWeightSamples(dailyRecords, endDate, -13, -7);
+  if (recentSamples.length < 4 || previousSamples.length < 4) {
+    return { status: "insufficient", message: "최근 7일과 이전 7일에 각각 공복 체중 4개 이상이 쌓이면 자동 보정합니다.", calorieDelta: 0, endKey, recentCount: recentSamples.length, previousCount: previousSamples.length };
+  }
+  const recentAverage = averageWeight(recentSamples);
+  const previousAverage = averageWeight(previousSamples);
+  const weeklyChangeKg = recentAverage - previousAverage;
+  const weeklyChangePercent = previousAverage > 0 ? (weeklyChangeKg / previousAverage) * 100 : 0;
+  return { ...getAdaptiveDecision(goalKey, weeklyChangePercent), endKey, goalKey, recentAverage, previousAverage, recentCount: recentSamples.length, previousCount: previousSamples.length, weeklyChangeKg, weeklyChangePercent };
+}
+
+export function applyAdaptiveCalorieCheck(plan, check) {
+  if (!plan || !check) return plan;
+  const adaptive = { status: check.status, message: check.message, endKey: check.endKey, recentAverage: check.recentAverage, previousAverage: check.previousAverage, weeklyChangeKg: check.weeklyChangeKg, weeklyChangePercent: check.weeklyChangePercent, calorieDelta: check.calorieDelta };
+  if (plan.isManualTarget || !["increase", "decrease", "keep"].includes(check.status)) return { ...plan, adaptive };
+  if (plan.lastAdjustmentEndKey && plan.lastAdjustmentEndKey === check.endKey) {
+    return { ...plan, adaptive: { ...adaptive, status: "already-adjusted", message: "이미 같은 7일 구간으로 자동 보정을 반영했습니다." } };
+  }
+  const baseCalorieGoal = toNumber(plan.baseCalorieGoal) || Math.max(1, Math.round(toNumber(plan.calorieGoal)));
+  const currentAdjustment = toNumber(plan.adjustmentKcal);
+  const nextAdjustment = clamp(currentAdjustment + toNumber(check.calorieDelta), -600, 600);
+  const calorieGoal = Math.max(1, baseCalorieGoal + nextAdjustment);
+  const goalKey = plan.goalKey || plan.profile?.goal || FALLBACK_PROFILE.goal;
+  const macroTargets = buildMacroTargets(calorieGoal, plan.profile || FALLBACK_PROFILE, goalKey);
+  const adjustmentHistory = toNumber(check.calorieDelta) === 0 ? (plan.adjustmentHistory || []) : [{ endKey: check.endKey, calorieDelta: toNumber(check.calorieDelta), adjustmentKcal: nextAdjustment, calorieGoal, weeklyChangeKg: check.weeklyChangeKg, weeklyChangePercent: check.weeklyChangePercent }, ...(plan.adjustmentHistory || [])].slice(0, 12);
+  return { ...plan, calorieGoal, baseCalorieGoal, adjustmentKcal: nextAdjustment, macroTargets, adaptive, adjustmentHistory, lastAdjustmentEndKey: check.endKey };
+}
+
+export function maybeApplyAdaptiveCalories(plan, dailyRecords, selectedDate) {
+  const check = getAdaptiveCalorieCheck(plan, dailyRecords, selectedDate);
+  return applyAdaptiveCalorieCheck(plan, check);
 }
 
 export function isRequiredProfileFilled(profile) {

@@ -46,6 +46,7 @@ import {
   getGapTone,
   getMacroCalorieGap,
   getMacroCalories,
+  maybeApplyAdaptiveCalories,
   getTargetFormValues,
   isRequiredProfileFilled,
   targetValuesToForm,
@@ -585,18 +586,22 @@ export default function App() {
     setDayComplete(true);
     setIsAddingMeal(false);
     setEditingMealId(null);
-    setDailyRecords((current) => ({
-      ...current,
+
+    const nextDailyRecords = {
+      ...dailyRecords,
       [selectedDateKey]: {
-        ...current[selectedDateKey],
+        ...dailyRecords[selectedDateKey],
         dayComplete: true,
         kcal: Math.round(totals.kcal),
         carb: totals.carb,
         protein: totals.protein,
         fat: totals.fat,
-        morningWeight: toNumber(morningWeight) || current[selectedDateKey]?.morningWeight || 0,
+        morningWeight: toNumber(morningWeight) || dailyRecords[selectedDateKey]?.morningWeight || 0,
       },
-    }));
+    };
+
+    setDailyRecords(nextDailyRecords);
+    setNutritionPlan((current) => maybeApplyAdaptiveCalories(current || buildNutritionPlan(profile), nextDailyRecords, selectedDate));
     window.alert("오늘 하루 식단을 완성했어.");
   };
 
