@@ -112,8 +112,8 @@ export function getJobCalories(jobActivity) {
     sedentary: 0,
     light: 100,
     moderate: 150,
-    high: 250,
-    physical: 400,
+    high: 400,
+    physical: 500,
   };
 
   return caloriesByJob[jobActivity] ?? caloriesByJob.light;
@@ -136,27 +136,9 @@ export function buildMacroTargets(calorieGoal, data, goalKey) {
 }
 
 export function getMacroIntakeStatus(macro, value, target, profileOrWeight) {
-  const amount = Math.max(0, toNumber(value));
-  const targetValue = Math.max(0, toNumber(target));
-  const weight = Math.max(0, toNumber(profileOrWeight?.weight ?? profileOrWeight));
-
-  if (macro === "protein") {
-    const excessiveProtein = weight > 0 ? weight * 2.5 : targetValue * 1.2;
-    if (excessiveProtein > 0 && amount > excessiveProtein) {
-      return {
-        tone: "warning",
-        isOver: true,
-        isLow: false,
-        message: "단백질이 체중 대비 과도하게 높아요. 하루 총량을 조금 조절해보세요.",
-      };
-    }
-    return { tone: "ok", isOver: false, isLow: false, message: "" };
-  }
-
-  if (targetValue > 0 && amount > targetValue) {
-    return { tone: "warning", isOver: true, isLow: false, message: "" };
-  }
-
+  // 목표 초과를 빨간 경고로 표시하지 않는다.
+  // 벌크/근비대 식단에서는 단백질·탄수·지방이 목표를 조금 넘는 것이 곧바로 문제가 아니며,
+  // 사용자는 남은 칼로리와 주간 평균으로 조절하는 편이 더 자연스럽다.
   return { tone: "ok", isOver: false, isLow: false, message: "" };
 }
 

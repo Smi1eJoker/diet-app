@@ -68,10 +68,10 @@ export const JOB_ACTIVITY_OPTIONS = [
   {
     value: "high",
     label: "많이 움직임",
-    description: "서서 일하거나 이동이 많고, 주 4~6회 운동",
-    stepsLabel: "10,000 ~ 15,000보",
+    description: "서서 일하거나 이동이 많은 생활",
+    stepsLabel: "높은 생활 활동",
     defaultSteps: 12500,
-    kcal: 420,
+    kcal: 400,
   },
   {
     value: "physical",
@@ -79,7 +79,7 @@ export const JOB_ACTIVITY_OPTIONS = [
     description: "무거운 물건을 들거나 강한 신체활동이 많은 직업",
     stepsLabel: "매우 높은 생활 활동",
     defaultSteps: 16000,
-    kcal: 620,
+    kcal: 500,
   },
 ];
 

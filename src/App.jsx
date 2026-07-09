@@ -1993,10 +1993,11 @@ export default function App() {
                   placeholder={shouldShowMemoExamples ? (MEMO_EXAMPLE_ROWS[index]?.time || "") : ""}
                   aria-label={`${index + 1}번째 식사 시각`}
                 />
-                <input
+                <textarea
                   ref={(element) => { memoFoodRefs.current[index] = element; }}
                   className="memo-food-input"
                   value={row.foods}
+                  rows={Math.max(1, Math.ceil((row.foods || "").length / 20))}
                   onChange={(event) => handleMemoRowFoodChange(index, event)}
                   onKeyDown={(event) => handleMemoRowFoodKeyDown(index, event)}
                   onFocus={(event) => updateActiveMemoFoodCursor(index, event.currentTarget)}

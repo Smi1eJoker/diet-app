@@ -4246,3 +4246,32 @@ textarea,
   gap: 0;
   padding: 0 2px;
 }
+
+
+/* PT fixes v2: keep macro bars calm and wrap long memo food lines */
+.macro-fill.is-over {
+  background: #66e36f;
+}
+
+.macro-row .form-error {
+  display: none;
+}
+
+.daily-memo-row {
+  align-items: start;
+}
+
+.memo-food-input {
+  min-height: 25px;
+  height: auto;
+  resize: none;
+  overflow: hidden;
+  white-space: pre-wrap;
+  word-break: keep-all;
+  overflow-wrap: anywhere;
+  line-height: 25px;
+}
+
+.memo-time-input {
+  padding-top: 0;
+}
