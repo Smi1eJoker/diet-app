@@ -479,3 +479,69 @@ export async function upsertUserDailyLog(session, dateKey, meals, dailyRecord) {
 
   return Array.isArray(rows) && rows[0] ? rows[0] : payload;
 }
+
+export function toExternalFoodEntry(row) {
+  const displayName = cleanFoodName(row.display_name || row.food_name || "");
+
+  return {
+    id: "external-" + (row.external_food_id || normalize(displayName)),
+    externalFoodId: row.external_food_id || null,
+    name: displayName,
+    canonicalName: displayName,
+    maker: row.maker || "",
+    category: row.category || "",
+    subCategory: row.sub_category || "",
+    originName: row.origin_name || "",
+    baseAmount: toNumber(row.basis_amount) || 100,
+    basisUnit: row.basis_unit || "g",
+    kcal: toNumber(row.kcal_per_100),
+    carb: toNumber(row.carb_g_per_100),
+    protein: toNumber(row.protein_g_per_100),
+    fat: toNumber(row.fat_g_per_100),
+    sugar: toNumber(row.sugar_g_per_100),
+    sodium: toNumber(row.sodium_mg_per_100),
+    saturatedFat: toNumber(row.saturated_fat_g_per_100),
+    transFat: toNumber(row.trans_fat_g_per_100),
+    source: "external_food",
+    sourceLabel: "외부 음식 DB",
+    displayName,
+  };
+}
+
+export async function searchExternalFoods(query, limit = 20) {
+  const keyword = cleanFoodName(query);
+  const normalized = normalize(keyword);
+
+  if (!normalized) return [];
+
+  const safeLimit = Math.min(Math.max(toNumber(limit) || 20, 1), 50);
+  const columns = [
+    "external_food_id",
+    "food_name",
+    "display_name",
+    "category",
+    "sub_category",
+    "origin_name",
+    "maker",
+    "basis_amount",
+    "basis_unit",
+    "kcal_per_100",
+    "carb_g_per_100",
+    "protein_g_per_100",
+    "fat_g_per_100",
+    "sugar_g_per_100",
+    "sodium_mg_per_100",
+    "saturated_fat_g_per_100",
+    "trans_fat_g_per_100",
+    "search_priority",
+  ].join(",");
+
+  const path =
+    "/external_foods?select=" + columns +
+    "&search_text_norm=ilike.*" + encodeURIComponent(normalized) + "*" +
+    "&order=search_priority.desc,display_name.asc" +
+    "&limit=" + safeLimit;
+
+  const rows = await requestSupabaseRest(path, {}, null);
+  return Array.isArray(rows) ? rows.map(toExternalFoodEntry) : [];
+}

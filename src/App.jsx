@@ -16,6 +16,7 @@ import {
   mergeAuthSession,
   refreshSupabaseSession,
   saveStoredSession,
+  searchExternalFoods,
   signInWithEmail,
   signOutFromSupabase,
   signUpWithEmail,
@@ -126,6 +127,54 @@ function hasQuantityInMemoSegment(segment) {
   });
 }
 
+const EMPTY_EXTERNAL_SEARCH_STATE = {
+  query: "",
+  results: [],
+  loading: false,
+  error: "",
+  searched: false,
+};
+
+function getExternalFoodPer100Value(food, key) {
+  const per100Key = key + "Per100g";
+  return toNumber(food?.[per100Key] ?? food?.[key]);
+}
+
+function makeExternalFoodBasis(food, fallbackName = "") {
+  const foodName = cleanFoodName(food?.name || fallbackName);
+  const sourceKey = cleanFoodName(food?.sourceFoodCode || food?.id || foodName);
+
+  return {
+    id: "external-" + normalize([food?.externalFoodId || food?.source || "external", sourceKey || foodName].join("-")),
+    name: foodName,
+    kcal: getExternalFoodPer100Value(food, "kcal"),
+    carb: getExternalFoodPer100Value(food, "carb"),
+    protein: getExternalFoodPer100Value(food, "protein"),
+    fat: getExternalFoodPer100Value(food, "fat"),
+    source: "external_food",
+    externalSource: food?.source || "external_food",
+    externalFoodId: food?.externalFoodId || food?.sourceFoodCode || "",
+    externalSourceLabel: food?.sourceLabel || "외부 음식 DB",
+  };
+}
+
+function makeMyFoodFormFromExternalFood(food) {
+  const basisFood = makeExternalFoodBasis(food);
+
+  return {
+    name: basisFood.name,
+    baseAmount: "100",
+    kcal: basisFood.kcal ? String(Math.round(basisFood.kcal)) : "",
+    carb: basisFood.carb ? formatMacro(basisFood.carb) : "",
+    protein: basisFood.protein ? formatMacro(basisFood.protein) : "",
+    fat: basisFood.fat ? formatMacro(basisFood.fat) : "",
+  };
+}
+
+function getExternalFoodMetaText(food) {
+  return [food?.maker, food?.category, food?.sourceLabel || "외부 음식 DB"].filter(Boolean).join(" · ");
+}
+
 export default function App() {
   const [authSession, setAuthSession] = useState(() => loadStoredSession());
   const [authChecking, setAuthChecking] = useState(() => Boolean(authSession));
@@ -166,6 +215,8 @@ export default function App() {
   const [nutritionTarget, setNutritionTarget] = useState(null);
   const [matchChoiceTarget, setMatchChoiceTarget] = useState(null);
   const [nutritionForm, setNutritionForm] = useState({ baseAmount: "100", kcal: "", carb: "", protein: "", fat: "" });
+  const [nutritionExternalSearch, setNutritionExternalSearch] = useState(EMPTY_EXTERNAL_SEARCH_STATE);
+  const [myFoodExternalSearch, setMyFoodExternalSearch] = useState(EMPTY_EXTERNAL_SEARCH_STATE);
   const [myFoodEditTarget, setMyFoodEditTarget] = useState(null);
   const [myFoodModalOpen, setMyFoodModalOpen] = useState(false);
   const [myFoodForm, setMyFoodForm] = useState({ name: "", baseAmount: "100", kcal: "", carb: "", protein: "", fat: "" });
@@ -1312,9 +1363,9 @@ export default function App() {
       source: "user_alias",
     };
 
-    const nextCustomFoods = { ...customFoods, [normalize(aliasName)]: aliasFood };
+    const canSaveRemoteAlias = Boolean(food.appFoodId || food.app_food_id || food.userFoodId || food.user_food_id);
 
-    if (HAS_SUPABASE_CONFIG && authSession) {
+    if (HAS_SUPABASE_CONFIG && authSession && canSaveRemoteAlias) {
       try {
         await upsertUserAlias(authSession, aliasName, food);
       } catch (error) {
@@ -1322,8 +1373,31 @@ export default function App() {
       }
     }
 
-    setCustomFoods(nextCustomFoods);
-    return nextCustomFoods;
+    setCustomFoods((current) => ({ ...current, [normalize(aliasName)]: aliasFood }));
+    return aliasFood;
+  };
+
+  const ensurePersistentFoodBasis = async (food) => {
+    if (!food) return null;
+    if (food.appFoodId || food.app_food_id || food.userFoodId || food.user_food_id) return food;
+
+    const shouldPersistAsUserFood = food.source === "external_food";
+    if (!shouldPersistAsUserFood || !HAS_SUPABASE_CONFIG || !authSession) return food;
+
+    try {
+      const savedRow = await upsertUserFood(authSession, {
+        ...food,
+        base_amount_g: 100,
+        base_amount: 100,
+        base_unit: "g",
+      });
+      const storedFood = toFoodEntry(savedRow, food.id);
+      setCustomFoods((current) => mergeManagedUserFood(current, null, storedFood));
+      return storedFood;
+    } catch (error) {
+      console.warn("외부 음식 DB 저장 실패, 이번 항목 기준으로만 반영:", error);
+      return food;
+    }
   };
 
   const connectAliasToFood = async (aliasText, food, options = {}) => {
@@ -1339,9 +1413,9 @@ export default function App() {
       source: "user_alias",
     };
 
-    const nextCustomFoods = { ...customFoods, [normalize(aliasName)]: aliasFood };
+    const canSaveRemoteAlias = Boolean(food.appFoodId || food.app_food_id || food.userFoodId || food.user_food_id);
 
-    if (HAS_SUPABASE_CONFIG && authSession) {
+    if (HAS_SUPABASE_CONFIG && authSession && canSaveRemoteAlias) {
       try {
         await upsertUserAlias(authSession, aliasName, food);
       } catch (error) {
@@ -1353,10 +1427,10 @@ export default function App() {
     // 이미 기록된 같은 이름의 음식까지 다시 계산하면
     // 예: 06시 밥=백미밥 기록이 09시 밥=찹쌀밥 저장 후 같이 바뀌는 문제가 생긴다.
     // 기존 기록은 item.per100/matchedFoodName에 남아 있으므로 이번 항목 기준처럼 고정한다.
-    setCustomFoods(nextCustomFoods);
+    setCustomFoods((current) => ({ ...current, [normalize(aliasName)]: aliasFood }));
 
     if (options.closeModal) closeNutritionModal();
-    return nextCustomFoods;
+    return aliasFood;
   };
 
   const getItemBasisFood = (item) => {
@@ -1387,6 +1461,7 @@ export default function App() {
       amount: item.amount,
       currentFood,
     });
+    setNutritionExternalSearch({ ...EMPTY_EXTERNAL_SEARCH_STATE, query: cleanFoodName(item.name) });
     setNutritionForm({
       baseAmount: "100",
       kcal: currentFood ? String(Math.round(toNumber(currentFood.kcal))) : "",
@@ -1399,6 +1474,7 @@ export default function App() {
   const closeNutritionModal = () => {
     setNutritionTarget(null);
     setMatchChoiceTarget((current) => current?.source === "nutrition" ? null : current);
+    setNutritionExternalSearch(EMPTY_EXTERNAL_SEARCH_STATE);
     setNutritionForm({ baseAmount: "100", kcal: "", carb: "", protein: "", fat: "" });
   };
 
@@ -1452,6 +1528,7 @@ export default function App() {
   const openNewMyFoodModal = () => {
     setMyFoodEditTarget(null);
     setMyFoodError("");
+    setMyFoodExternalSearch(EMPTY_EXTERNAL_SEARCH_STATE);
     setMyFoodForm({ name: "", baseAmount: "100", kcal: "", carb: "", protein: "", fat: "" });
     setMyFoodModalOpen(true);
   };
@@ -1459,6 +1536,7 @@ export default function App() {
   const openEditMyFoodModal = (food) => {
     setMyFoodEditTarget(food || null);
     setMyFoodError("");
+    setMyFoodExternalSearch(EMPTY_EXTERNAL_SEARCH_STATE);
     setMyFoodForm(makeUserFoodFormFromFood(food));
     setMyFoodModalOpen(true);
   };
@@ -1467,6 +1545,7 @@ export default function App() {
     setMyFoodEditTarget(null);
     setMyFoodModalOpen(false);
     setMyFoodError("");
+    setMyFoodExternalSearch(EMPTY_EXTERNAL_SEARCH_STATE);
     setMyFoodForm({ name: "", baseAmount: "100", kcal: "", carb: "", protein: "", fat: "" });
   };
 
@@ -1661,6 +1740,7 @@ export default function App() {
 
   const applyMatchOnce = () => {
     if (!matchChoiceTarget) return;
+    const targetFood = matchChoiceTarget.food;
 
     if (matchChoiceTarget.source === "memo") {
       const key = getMemoBasisKey(matchChoiceTarget.rowIndex, matchChoiceTarget.segmentIndex, matchChoiceTarget.entryIndex || 0);
@@ -1668,14 +1748,14 @@ export default function App() {
         ...current,
         [key]: {
           aliasName: matchChoiceTarget.aliasName,
-          food: matchChoiceTarget.food,
+          food: targetFood,
         },
       }));
       setMemoPreviewHidden(true);
     }
 
     if (matchChoiceTarget.source === "nutrition") {
-      applyFoodBasisToMealItem(matchChoiceTarget.mealId, matchChoiceTarget.itemId, matchChoiceTarget.food);
+      applyFoodBasisToMealItem(matchChoiceTarget.mealId, matchChoiceTarget.itemId, targetFood);
       closeNutritionModal();
     }
 
@@ -1685,7 +1765,8 @@ export default function App() {
   const applyMatchForever = async () => {
     if (!matchChoiceTarget) return;
 
-    await saveAliasForFuture(matchChoiceTarget.aliasName, matchChoiceTarget.food);
+    const targetFood = await ensurePersistentFoodBasis(matchChoiceTarget.food);
+    await saveAliasForFuture(matchChoiceTarget.aliasName, targetFood);
 
     if (matchChoiceTarget.source === "memo") {
       const key = getMemoBasisKey(matchChoiceTarget.rowIndex, matchChoiceTarget.segmentIndex, matchChoiceTarget.entryIndex || 0);
@@ -1693,14 +1774,14 @@ export default function App() {
         ...current,
         [key]: {
           aliasName: matchChoiceTarget.aliasName,
-          food: matchChoiceTarget.food,
+          food: targetFood,
         },
       }));
       setMemoPreviewHidden(true);
     }
 
     if (matchChoiceTarget.source === "nutrition") {
-      applyFoodBasisToMealItem(matchChoiceTarget.mealId, matchChoiceTarget.itemId, matchChoiceTarget.food);
+      applyFoodBasisToMealItem(matchChoiceTarget.mealId, matchChoiceTarget.itemId, targetFood);
       closeNutritionModal();
     }
 
@@ -1831,6 +1912,47 @@ export default function App() {
       event.preventDefault();
       foodEditAmountRef.current?.focus();
     }
+  };
+
+  const runExternalFoodSearch = async (query, setState) => {
+    const keyword = String(query || "").trim();
+    if (!keyword) {
+      setState((current) => ({ ...current, error: "검색어를 입력해줘.", searched: true, results: [] }));
+      return;
+    }
+
+    setState((current) => ({ ...current, query: keyword, loading: true, error: "", searched: true }));
+
+    try {
+      const results = await searchExternalFoods(keyword);
+      setState((current) => ({ ...current, loading: false, results, error: "", searched: true }));
+    } catch (error) {
+      setState((current) => ({
+        ...current,
+        loading: false,
+        results: [],
+        error: error?.message || "음식 DB 조회에 실패했습니다. 직접 등록해줘.",
+        searched: true,
+      }));
+    }
+  };
+
+  const searchNutritionExternalCandidates = () => {
+    runExternalFoodSearch(nutritionExternalSearch.query || nutritionTarget?.name || "", setNutritionExternalSearch);
+  };
+
+  const searchMyFoodExternalCandidates = () => {
+    runExternalFoodSearch(myFoodExternalSearch.query || myFoodForm.name || "", setMyFoodExternalSearch);
+  };
+
+  const openNutritionExternalMatchChoice = (food) => {
+    if (!nutritionTarget || !food) return;
+    openNutritionMatchChoice(makeExternalFoodBasis(food, nutritionTarget.name));
+  };
+
+  const applyExternalFoodToMyFoodForm = (food) => {
+    if (!food) return;
+    setMyFoodForm(makeMyFoodFormFromExternalFood(food));
   };
 
   const nutritionCandidateFoods = useMemo(() => {
@@ -2133,6 +2255,48 @@ export default function App() {
       {myFoodModalOpen && (
         <Modal title={myFoodEditTarget ? "나의 음식 수정" : "나의 음식 추가"} onClose={closeMyFoodModal}>
           <form className="modal-form" onSubmit={saveMyFood}>
+            {!myFoodEditTarget && (
+              <div className="public-food-search-panel">
+                <label>
+                  <span>음식 DB 검색</span>
+                  <div className="public-food-search-row">
+                    <input
+                      value={myFoodExternalSearch.query}
+                      onChange={(event) => setMyFoodExternalSearch((current) => ({ ...current, query: event.target.value }))}
+                      placeholder="예: 짜파게티"
+                      lang="ko-KR"
+                      autoCapitalize="off"
+                    />
+                    <button type="button" className="ghost-button" onClick={searchMyFoodExternalCandidates} disabled={myFoodExternalSearch.loading}>
+                      {myFoodExternalSearch.loading ? "검색 중" : "검색"}
+                    </button>
+                  </div>
+                </label>
+                {myFoodExternalSearch.error && <p className="public-food-status is-error">{myFoodExternalSearch.error}</p>}
+                {myFoodExternalSearch.loading && <p className="public-food-status">검색 중...</p>}
+                {!myFoodExternalSearch.loading && myFoodExternalSearch.searched && !myFoodExternalSearch.error && myFoodExternalSearch.results.length === 0 && (
+                  <p className="public-food-status">검색 결과가 없습니다.</p>
+                )}
+                {myFoodExternalSearch.results.length > 0 && (
+                  <div className="alias-candidate-list public-food-candidate-list">
+                    {myFoodExternalSearch.results.map((food) => {
+                      const basisFood = makeExternalFoodBasis(food);
+                      return (
+                        <button key={food.id || food.sourceFoodCode || food.name} type="button" onClick={() => applyExternalFoodToMyFoodForm(food)}>
+                          <strong>{basisFood.name}</strong>
+                          <em>100g</em>
+                          <span>
+                            <b>{Math.round(basisFood.kcal)}kcal</b>
+                            <small>C {formatMacro(basisFood.carb)}g P {formatMacro(basisFood.protein)}g F {formatMacro(basisFood.fat)}g</small>
+                            {getExternalFoodMetaText(food) && <small>{getExternalFoodMetaText(food)}</small>}
+                          </span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            )}
             <label>
               <span>음식명</span>
               <input
@@ -2314,8 +2478,55 @@ export default function App() {
               </div>
             )}
             {nutritionCandidateFoods.length === 0 && (
-              <p className="nutrition-empty-hint">후보가 없으면 나의 음식 &gt; 직접 등록에서 먼저 추가해줘.</p>
+              <p className="nutrition-empty-hint">내부 DB 후보가 없으면 아래 음식 DB 검색을 사용해줘.</p>
             )}
+
+            <div className="public-food-search-panel">
+              <label>
+                <span>음식 DB 검색</span>
+                <div className="public-food-search-row">
+                  <input
+                    value={nutritionExternalSearch.query}
+                    onChange={(event) => setNutritionExternalSearch((current) => ({ ...current, query: event.target.value }))}
+                    placeholder="예: 짜파게티"
+                    lang="ko-KR"
+                    autoCapitalize="off"
+                  />
+                  <button
+                    type="button"
+                    className="ghost-button"
+                    onClick={searchNutritionExternalCandidates}
+                    disabled={nutritionExternalSearch.loading}
+                  >
+                    {nutritionExternalSearch.loading ? "검색 중" : "검색"}
+                  </button>
+                </div>
+              </label>
+              {nutritionExternalSearch.error && <p className="public-food-status is-error">{nutritionExternalSearch.error}</p>}
+              {nutritionExternalSearch.loading && <p className="public-food-status">검색 중...</p>}
+              {!nutritionExternalSearch.loading && nutritionExternalSearch.searched && !nutritionExternalSearch.error && nutritionExternalSearch.results.length === 0 && (
+                <p className="public-food-status">검색 결과가 없습니다.</p>
+              )}
+              {nutritionExternalSearch.results.length > 0 && (
+                <div className="alias-candidate-list public-food-candidate-list">
+                  {nutritionExternalSearch.results.map((food) => {
+                    const basisFood = makeExternalFoodBasis(food, nutritionTarget.name);
+                    return (
+                      <button key={food.id || food.sourceFoodCode || food.name} type="button" onClick={() => openNutritionExternalMatchChoice(food)}>
+                        <strong>{basisFood.name}</strong>
+                        <em>100g</em>
+                        <span>
+                          <b>{Math.round(basisFood.kcal)}kcal</b>
+                          <small>C {formatMacro(basisFood.carb)}g P {formatMacro(basisFood.protein)}g F {formatMacro(basisFood.fat)}g</small>
+                          {getExternalFoodMetaText(food) && <small>{getExternalFoodMetaText(food)}</small>}
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+
             <div className="modal-actions single-action">
               <button type="button" className="primary-button" onClick={closeNutritionModal}>닫기</button>
             </div>
