@@ -94,9 +94,9 @@ export function MacroCalorieBarChart({ points, emptyText }) {
             <strong>{Math.round(toNumber(selectedPoint.kcal)).toLocaleString()}kcal</strong>
           </div>
           <div className="macro-calorie-detail-list">
-            <span><i className="is-carb" />탄 {formatMacro(toNumber(selectedPoint.carb))}g <b>{Math.round(toNumber(selectedPoint.carbKcal))}kcal</b></span>
-            <span><i className="is-protein" />단 {formatMacro(toNumber(selectedPoint.protein))}g <b>{Math.round(toNumber(selectedPoint.proteinKcal))}kcal</b></span>
-            <span><i className="is-fat" />지 {formatMacro(toNumber(selectedPoint.fat))}g <b>{Math.round(toNumber(selectedPoint.fatKcal))}kcal</b></span>
+            <span><i className="is-carb" />Carb {formatMacro(toNumber(selectedPoint.carb))}g <b>{Math.round(toNumber(selectedPoint.carbKcal))}kcal</b></span>
+            <span><i className="is-protein" />Pro {formatMacro(toNumber(selectedPoint.protein))}g <b>{Math.round(toNumber(selectedPoint.proteinKcal))}kcal</b></span>
+            <span><i className="is-fat" />Fat {formatMacro(toNumber(selectedPoint.fat))}g <b>{Math.round(toNumber(selectedPoint.fatKcal))}kcal</b></span>
           </div>
         </div>
       )}
