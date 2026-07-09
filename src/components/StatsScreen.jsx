@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { formatMacro } from "../utils/nutrition";
+import { formatMacro, toNumber } from "../utils/nutrition";
 
 export default function StatsScreen({ stats }) {
   const [calorieRange, setCalorieRange] = useState("24");
@@ -12,9 +12,9 @@ export default function StatsScreen({ stats }) {
       <div className="stats-card weight-chart-card">
         <div className="section-title chart-title-row">
           <strong>일 섭취 칼로리</strong>
-          <ChartRangeToggle value={calorieRange} onChange={setCalorieRange} options={["24", "7", "30"]} />
+          <ChartRangeToggle value={calorieRange} onChange={setCalorieRange} options={["24", "7"]} />
         </div>
-        <LineChart points={calorieTrend} valueKey="kcal" unit="kcal" emptyText="아직 칼로리 기록이 없어." />
+        <MacroCalorieBarChart points={calorieTrend} emptyText="아직 칼로리 기록이 없어." />
       </div>
 
       <div className="stats-card weight-chart-card">
@@ -25,6 +25,82 @@ export default function StatsScreen({ stats }) {
         <LineChart points={weightTrend} valueKey="weight" unit="kg" emptyText="아직 체중 기록이 없어." />
       </div>
     </section>
+  );
+}
+
+export function MacroCalorieBarChart({ points, emptyText }) {
+  const [selectedIndex, setSelectedIndex] = useState(null);
+  const pointKeys = points.map((point) => point.key).join("|");
+  const maxBarHeight = 108;
+
+  useEffect(() => {
+    setSelectedIndex(null);
+  }, [pointKeys]);
+
+  if (points.length === 0) {
+    return <div className="chart-empty-state">{emptyText}</div>;
+  }
+
+  const maxKcal = Math.max(1, ...points.map((point) => toNumber(point.kcal)));
+  const selectedPoint = selectedIndex === null ? null : points[selectedIndex];
+
+  const getBarHeight = (point) => {
+    const height = (toNumber(point.kcal) / maxKcal) * maxBarHeight;
+    return Math.max(16, Math.min(maxBarHeight, height));
+  };
+
+  const getSegmentHeight = (point, key) => {
+    const macroKcal = toNumber(point.macroKcal);
+    if (macroKcal <= 0) return 0;
+    return Math.max(0, (toNumber(point[key]) / macroKcal) * 100);
+  };
+
+  const getPointTitle = (point) => point.tooltipLabel || point.label;
+
+  return (
+    <div className="macro-calorie-chart">
+      <div
+        className="macro-calorie-bars"
+        style={{ gridTemplateColumns: "repeat(" + points.length + ", minmax(42px, 1fr))" }}
+      >
+        {points.map((point, index) => {
+          const kcalText = Math.round(toNumber(point.kcal)).toLocaleString() + "kcal";
+
+          return (
+            <button
+              key={point.key || point.label}
+              className={selectedIndex === index ? "macro-calorie-bar-button is-selected" : "macro-calorie-bar-button"}
+              type="button"
+              style={{ "--bar-height": getBarHeight(point) + "px" }}
+              aria-label={kcalText + " / " + getPointTitle(point)}
+              onClick={() => setSelectedIndex((current) => (current === index ? null : index))}
+            >
+              <span className="macro-calorie-value">{kcalText}</span>
+              <span className="macro-calorie-bar">
+                <span className="macro-calorie-segment is-carb" style={{ height: getSegmentHeight(point, "carbKcal") + "%" }} />
+                <span className="macro-calorie-segment is-protein" style={{ height: getSegmentHeight(point, "proteinKcal") + "%" }} />
+                <span className="macro-calorie-segment is-fat" style={{ height: getSegmentHeight(point, "fatKcal") + "%" }} />
+              </span>
+              <span className="macro-calorie-label">{point.label}</span>
+            </button>
+          );
+        })}
+      </div>
+
+      {selectedPoint && (
+        <div className="macro-calorie-detail">
+          <div>
+            <span>{getPointTitle(selectedPoint)}</span>
+            <strong>{Math.round(toNumber(selectedPoint.kcal)).toLocaleString()}kcal</strong>
+          </div>
+          <div className="macro-calorie-detail-list">
+            <span><i className="is-carb" />탄 {formatMacro(toNumber(selectedPoint.carb))}g <b>{Math.round(toNumber(selectedPoint.carbKcal))}kcal</b></span>
+            <span><i className="is-protein" />단 {formatMacro(toNumber(selectedPoint.protein))}g <b>{Math.round(toNumber(selectedPoint.proteinKcal))}kcal</b></span>
+            <span><i className="is-fat" />지 {formatMacro(toNumber(selectedPoint.fat))}g <b>{Math.round(toNumber(selectedPoint.fatKcal))}kcal</b></span>
+          </div>
+        </div>
+      )}
+    </div>
   );
 }
 

@@ -1,10 +1,29 @@
 import { buildDatePoints, getChartAnchorDate, getDateKey } from "./date";
-import { calculateTotals, toNumber } from "./nutrition";
+import { MACRO_CALORIE_FACTORS, calculateTotals, toNumber } from "./nutrition";
 import { parseTimeInput } from "./foodParser";
 
-export function buildHourlyCaloriePoints(meals = []) {
-  let cumulativeKcal = 0;
+function getMacroCalorieBreakdown(source = {}) {
+  const carb = toNumber(source.carb);
+  const protein = toNumber(source.protein);
+  const fat = toNumber(source.fat);
+  const carbKcal = carb * MACRO_CALORIE_FACTORS.carb;
+  const proteinKcal = protein * MACRO_CALORIE_FACTORS.protein;
+  const fatKcal = fat * MACRO_CALORIE_FACTORS.fat;
+  const macroKcal = carbKcal + proteinKcal + fatKcal;
 
+  return {
+    carb,
+    protein,
+    fat,
+    carbKcal,
+    proteinKcal,
+    fatKcal,
+    macroKcal,
+    kcal: Math.round(toNumber(source.kcal) || macroKcal),
+  };
+}
+
+export function buildHourlyCaloriePoints(meals = []) {
   return (meals || [])
     .map((meal, index) => {
       const time = parseTimeInput(meal.time);
@@ -12,8 +31,8 @@ export function buildHourlyCaloriePoints(meals = []) {
 
       const [hour, minute] = time.split(":").map(Number);
       const minutes = hour * 60 + minute;
-      const mealKcal = calculateTotals([meal]).kcal;
-      if (mealKcal <= 0) return null;
+      const mealTotals = getMacroCalorieBreakdown(calculateTotals([meal]));
+      if (mealTotals.kcal <= 0) return null;
 
       return {
         key: "24h-meal-" + index + "-" + time,
@@ -21,18 +40,11 @@ export function buildHourlyCaloriePoints(meals = []) {
         tooltipLabel: time,
         minutes,
         xPercent: Math.min(100, Math.max(0, (minutes / 1440) * 100)),
-        mealKcal,
+        ...mealTotals,
       };
     })
     .filter(Boolean)
-    .sort((a, b) => a.minutes - b.minutes)
-    .map((point) => {
-      cumulativeKcal += point.mealKcal;
-      return {
-        ...point,
-        kcal: Math.round(cumulativeKcal),
-      };
-    });
+    .sort((a, b) => a.minutes - b.minutes);
 }
 
 export function buildStats(meals, plan, morningWeight, dailyRecords, selectedDate) {
@@ -64,13 +76,12 @@ export function buildStats(meals, plan, morningWeight, dailyRecords, selectedDat
   const makeCalorieTrend = (range) => {
     if (range === "24") return buildHourlyCaloriePoints(meals);
 
-    const days = range === "30" ? 30 : 7;
-    return buildDatePoints(chartAnchorDate, days)
+    return buildDatePoints(chartAnchorDate, 7)
       .map((point) => {
         const record = records[point.key] || {};
         return {
           ...point,
-          kcal: record.dayComplete ? toNumber(record.kcal) : 0,
+          ...getMacroCalorieBreakdown(record),
         };
       })
       .filter((point) => point.kcal > 0);

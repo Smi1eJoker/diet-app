@@ -1610,6 +1610,161 @@ button {
   text-align: center;
 }
 
+.macro-calorie-chart {
+  display: grid;
+  gap: 10px;
+  padding: 12px 10px 10px;
+  border: 1px solid #242424;
+  border-radius: 12px;
+  background: linear-gradient(180deg, #181818, #151515);
+}
+
+.macro-calorie-bars {
+  display: grid;
+  align-items: end;
+  gap: 12px;
+  min-height: 156px;
+  overflow-x: auto;
+  padding: 4px 2px 2px;
+  scrollbar-width: none;
+}
+
+.macro-calorie-bars::-webkit-scrollbar {
+  display: none;
+}
+
+.macro-calorie-bar-button {
+  display: grid;
+  grid-template-rows: 18px 1fr 16px;
+  justify-items: center;
+  align-items: end;
+  min-width: 42px;
+  height: 156px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+}
+
+.macro-calorie-value {
+  color: #f5f5f5;
+  font-size: 10px;
+  font-weight: 900;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.macro-calorie-bar {
+  display: flex;
+  flex-direction: column-reverse;
+  width: 22px;
+  height: var(--bar-height);
+  min-height: 16px;
+  overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 7px 7px 4px 4px;
+  background: #242424;
+  transition: border-color 160ms ease, box-shadow 160ms ease;
+}
+
+.macro-calorie-bar-button.is-selected .macro-calorie-bar {
+  border-color: #f5f5f5;
+  box-shadow: 0 0 0 2px rgba(245, 245, 245, 0.12);
+}
+
+.macro-calorie-segment {
+  display: block;
+  min-height: 0;
+}
+
+.macro-calorie-segment.is-carb {
+  background: #f97316;
+}
+
+.macro-calorie-segment.is-protein {
+  background: #66e36f;
+}
+
+.macro-calorie-segment.is-fat {
+  background: #f59e0b;
+}
+
+.macro-calorie-label {
+  color: #a3a3a3;
+  font-size: 10px;
+  font-weight: 900;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.macro-calorie-detail {
+  display: grid;
+  gap: 5px;
+  padding: 9px 10px;
+  border: 1px solid #2a2a2a;
+  border-radius: 10px;
+  background: rgba(0, 0, 0, 0.28);
+}
+
+.macro-calorie-detail div {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.macro-calorie-detail span {
+  margin: 0;
+  color: #a3a3a3;
+  font-size: 11px;
+  font-weight: 900;
+}
+
+.macro-calorie-detail strong {
+  color: #f5f5f5;
+  font-size: 13px;
+  font-weight: 900;
+}
+
+.macro-calorie-detail-list {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.macro-calorie-detail-list span {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  align-items: center;
+  column-gap: 5px;
+  min-width: 0;
+}
+
+.macro-calorie-detail-list i {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+}
+
+.macro-calorie-detail-list i.is-carb {
+  background: #f97316;
+}
+
+.macro-calorie-detail-list i.is-protein {
+  background: #66e36f;
+}
+
+.macro-calorie-detail-list i.is-fat {
+  background: #f59e0b;
+}
+
+.macro-calorie-detail-list b {
+  grid-column: 2;
+  color: #f5f5f5;
+  font-size: 10px;
+  font-weight: 900;
+}
+
 
 .chart-title-row {
   align-items: center;
