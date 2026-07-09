@@ -1,7 +1,8 @@
 const MFDS_SERVICE_ID = "I0750";
 const MFDS_SOURCE = "mfds_nutrition_db";
 const MFDS_SOURCE_LABEL = "식약처 식품영양성분DB";
-const MFDS_API_BASE = "https://openapi.foodsafetykorea.go.kr/api";
+// 식품안전나라 공식 명세는 http://openapi.foodsafetykorea.go.kr/api 형식이다.
+const MFDS_API_BASE = "http://openapi.foodsafetykorea.go.kr/api";
 const DEFAULT_PAGE_SIZE = 40;
 
 function toNumber(value) {
@@ -58,14 +59,26 @@ function getMfdsResult(data) {
   return payload?.RESULT || data?.RESULT || {};
 }
 
+function getServiceKeyForPath() {
+  const rawKey = String(process.env.PUBLIC_DATA_SERVICE_KEY || "")
+    .trim()
+    .replace(/^['\"]|['\"]$/g, "");
+
+  if (!rawKey) return "";
+
+  // 공공데이터포털에서 Encoding 키를 넣은 경우는 이미 %2B 같은 인코딩이 들어있다.
+  // Decoding 키를 넣은 경우만 URL path용으로 인코딩한다. 이중 인코딩 방지용.
+  const looksAlreadyEncoded = /%[0-9A-Fa-f]{2}/.test(rawKey);
+  return looksAlreadyEncoded ? rawKey : encodeURIComponent(rawKey);
+}
+
 function buildMfdsUrl(query) {
-  const serviceKey = String(process.env.PUBLIC_DATA_SERVICE_KEY || "").trim();
-  const encodedServiceKey = encodeURIComponent(serviceKey);
+  const serviceKey = getServiceKeyForPath();
   const startIndex = 1;
   const endIndex = DEFAULT_PAGE_SIZE;
-  const filter = new URLSearchParams({ DESC_KOR: query }).toString();
+  const filter = "DESC_KOR=" + encodeURIComponent(query);
 
-  return `${MFDS_API_BASE}/${encodedServiceKey}/${MFDS_SERVICE_ID}/json/${startIndex}/${endIndex}/${filter}`;
+  return `${MFDS_API_BASE}/${serviceKey}/${MFDS_SERVICE_ID}/json/${startIndex}/${endIndex}/${filter}`;
 }
 
 function normalizeMfdsFood(row) {
@@ -145,22 +158,23 @@ async function fetchMfdsFoods(query) {
   try {
     data = text ? JSON.parse(text) : null;
   } catch {
-    throw new Error("식약처 API 응답을 JSON으로 해석하지 못했습니다.");
+    const preview = text.replace(getServiceKeyForPath(), "[KEY]").slice(0, 220);
+    throw new Error("식약처 API 응답이 JSON이 아닙니다: " + preview);
   }
 
   if (!response.ok) {
-    throw new Error("식약처 API 오류: " + response.status);
+    throw new Error("식약처 API HTTP 오류: " + response.status);
   }
 
   const result = getMfdsResult(data);
   const resultCode = String(result?.CODE || "").trim();
   const resultMessage = String(result?.MSG || "").trim();
 
-  if (resultCode && resultCode !== "INFO-000" && resultCode !== "INFO-200") {
-    throw new Error(resultMessage || "식약처 API 조회에 실패했습니다.");
-  }
-
   if (resultCode === "INFO-200") return [];
+
+  if (resultCode && resultCode !== "INFO-000") {
+    throw new Error(`${resultCode}: ${resultMessage || "식약처 API 조회에 실패했습니다."}`);
+  }
 
   return dedupeFoods(
     getMfdsRows(data)
@@ -179,8 +193,11 @@ export default async function handler(req, res) {
       return res.status(400).json({ error: "검색어가 필요합니다." });
     }
 
-    if (!process.env.PUBLIC_DATA_SERVICE_KEY) {
-      return res.status(500).json({ error: "PUBLIC_DATA_SERVICE_KEY가 설정되지 않았습니다." });
+    if (!getServiceKeyForPath()) {
+      return res.status(500).json({
+        error: "PUBLIC_DATA_SERVICE_KEY가 설정되지 않았습니다.",
+        detail: "Vercel Environment Variables에 PUBLIC_DATA_SERVICE_KEY를 추가하고 Redeploy 해줘.",
+      });
     }
 
     const foods = (await fetchMfdsFoods(query)).slice(0, DEFAULT_PAGE_SIZE);
