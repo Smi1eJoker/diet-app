@@ -214,7 +214,7 @@ export default function App() {
   const [formError, setFormError] = useState("");
   const [nutritionTarget, setNutritionTarget] = useState(null);
   const [matchChoiceTarget, setMatchChoiceTarget] = useState(null);
-  const [nutritionForm, setNutritionForm] = useState({ baseAmount: "100", kcal: "", carb: "", protein: "", fat: "" });
+  const [nutritionForm, setNutritionForm] = useState({ name: "", baseAmount: "100", kcal: "", carb: "", protein: "", fat: "" });
   const [nutritionExternalSearch, setNutritionExternalSearch] = useState(EMPTY_EXTERNAL_SEARCH_STATE);
   const [myFoodExternalSearch, setMyFoodExternalSearch] = useState(EMPTY_EXTERNAL_SEARCH_STATE);
   const [myFoodEditTarget, setMyFoodEditTarget] = useState(null);
@@ -1463,6 +1463,7 @@ export default function App() {
     });
     setNutritionExternalSearch({ ...EMPTY_EXTERNAL_SEARCH_STATE, query: cleanFoodName(item.name) });
     setNutritionForm({
+      name: currentFood ? getFoodDisplayName(currentFood) : cleanFoodName(item.name),
       baseAmount: "100",
       kcal: currentFood ? String(Math.round(toNumber(currentFood.kcal))) : "",
       carb: currentFood ? formatMacro(toNumber(currentFood.carb)) : "",
@@ -1475,7 +1476,7 @@ export default function App() {
     setNutritionTarget(null);
     setMatchChoiceTarget((current) => current?.source === "nutrition" ? null : current);
     setNutritionExternalSearch(EMPTY_EXTERNAL_SEARCH_STATE);
-    setNutritionForm({ baseAmount: "100", kcal: "", carb: "", protein: "", fat: "" });
+    setNutritionForm({ name: "", baseAmount: "100", kcal: "", carb: "", protein: "", fat: "" });
   };
 
   const openFoodBasisModal = (mealId, foodId) => {
@@ -1492,16 +1493,17 @@ export default function App() {
 
     const baseAmount = toNumber(nutritionForm.baseAmount) || 100;
     const per100Rate = baseAmount > 0 ? 100 / baseAmount : 1;
+    const foodName = cleanFoodName(nutritionForm.name || nutritionTarget.name);
     const food = {
-      id: "custom-" + normalize(nutritionTarget.name),
-      name: cleanFoodName(nutritionTarget.name),
+      id: "custom-" + normalize(foodName),
+      name: foodName,
       kcal: toNumber(nutritionForm.kcal) * per100Rate,
       carb: toNumber(nutritionForm.carb) * per100Rate,
       protein: toNumber(nutritionForm.protein) * per100Rate,
       fat: toNumber(nutritionForm.fat) * per100Rate,
     };
 
-    if (baseAmount <= 0 || food.kcal <= 0) return;
+    if (!food.name || baseAmount <= 0 || food.kcal <= 0) return;
 
     let storedFood = food;
 
@@ -1517,11 +1519,13 @@ export default function App() {
       }
     }
 
-    const nextCustomFoods = { ...customFoods, [normalize(storedFood.name)]: storedFood };
-    setCustomFoods(nextCustomFoods);
-    updateMatchingItems((item) =>
-      normalize(item.name) === normalize(storedFood.name) ? resolveItem(item, nextCustomFoods) : item
-    );
+    setCustomFoods((current) => mergeManagedUserFood(current, null, storedFood));
+    applyFoodBasisToMealItem(nutritionTarget.mealId, nutritionTarget.itemId, storedFood);
+
+    if (normalize(nutritionTarget.name) !== normalize(storedFood.name)) {
+      await saveAliasForFuture(nutritionTarget.name, storedFood);
+    }
+
     closeNutritionModal();
   };
 
@@ -1945,9 +1949,21 @@ export default function App() {
     runExternalFoodSearch(myFoodExternalSearch.query || myFoodForm.name || "", setMyFoodExternalSearch);
   };
 
+  const handleNutritionExternalSearchKeyDown = (event) => {
+    if (event.key !== "Enter") return;
+    event.preventDefault();
+    searchNutritionExternalCandidates();
+  };
+
+  const handleMyFoodExternalSearchKeyDown = (event) => {
+    if (event.key !== "Enter") return;
+    event.preventDefault();
+    searchMyFoodExternalCandidates();
+  };
+
   const openNutritionExternalMatchChoice = (food) => {
     if (!nutritionTarget || !food) return;
-    openNutritionMatchChoice(makeExternalFoodBasis(food, nutritionTarget.name));
+    setNutritionForm(makeMyFoodFormFromExternalFood(food));
   };
 
   const applyExternalFoodToMyFoodForm = (food) => {
@@ -2263,6 +2279,7 @@ export default function App() {
                     <input
                       value={myFoodExternalSearch.query}
                       onChange={(event) => setMyFoodExternalSearch((current) => ({ ...current, query: event.target.value }))}
+                      onKeyDown={handleMyFoodExternalSearchKeyDown}
                       placeholder="예: 짜파게티"
                       lang="ko-KR"
                       autoCapitalize="off"
@@ -2454,33 +2471,8 @@ export default function App() {
       )}
 
       {nutritionTarget && (
-        <Modal title={nutritionTarget.name + " 음식 연결/등록"} onClose={closeNutritionModal} className="nutrition-modal">
-          <div className="modal-form">
-            {nutritionCandidateFoods.length > 0 && (
-              <div className="alias-candidate-panel">
-                <div className="alias-candidate-list">
-                  {nutritionCandidateFoods.map((food) => (
-                    <button
-                      key={food.id}
-                      type="button"
-                      className={food.isCurrentBasis ? "is-current-basis" : ""}
-                      onClick={() => openNutritionMatchChoice(food)}
-                    >
-                      <strong>{getFoodDisplayName(food)}</strong>
-                      <em>100g</em>
-                      <span>
-                        <b>{Math.round(food.kcal)}kcal</b>
-                        <small>C {formatMacro(food.carb)}g P {formatMacro(food.protein)}g F {formatMacro(food.fat)}g</small>
-                      </span>
-                    </button>
-                  ))}
-                </div>
-              </div>
-            )}
-            {nutritionCandidateFoods.length === 0 && (
-              <p className="nutrition-empty-hint">내부 DB 후보가 없으면 아래 음식 DB 검색을 사용해줘.</p>
-            )}
-
+        <Modal title="음식 연결/등록" onClose={closeNutritionModal}>
+          <form className="modal-form" onSubmit={saveNutrition}>
             <div className="public-food-search-panel">
               <label>
                 <span>음식 DB 검색</span>
@@ -2488,6 +2480,7 @@ export default function App() {
                   <input
                     value={nutritionExternalSearch.query}
                     onChange={(event) => setNutritionExternalSearch((current) => ({ ...current, query: event.target.value }))}
+                    onKeyDown={handleNutritionExternalSearchKeyDown}
                     placeholder="예: 짜파게티"
                     lang="ko-KR"
                     autoCapitalize="off"
@@ -2527,10 +2520,73 @@ export default function App() {
               )}
             </div>
 
-            <div className="modal-actions single-action">
-              <button type="button" className="primary-button" onClick={closeNutritionModal}>닫기</button>
+            <label>
+              <span>음식명</span>
+              <input
+                value={nutritionForm.name}
+                onChange={(event) => setNutritionForm((current) => ({ ...current, name: event.target.value }))}
+                placeholder="예: 제육"
+                lang="ko-KR"
+                autoCapitalize="off"
+              />
+            </label>
+            <div className="nutrition-manual-row nutrition-manual-row-two">
+              <label>
+                <span>기준 중량(g)</span>
+                <input
+                  value={nutritionForm.baseAmount}
+                  onChange={(event) => setNutritionForm((current) => ({ ...current, baseAmount: event.target.value }))}
+                  inputMode="numeric"
+                  min="1"
+                  step="1"
+                  placeholder="예: 100"
+                />
+              </label>
+              <label>
+                <span>kcal</span>
+                <input
+                  value={nutritionForm.kcal}
+                  onChange={(event) => setNutritionForm((current) => ({ ...current, kcal: event.target.value }))}
+                  inputMode="numeric"
+                  min="0"
+                  step="1"
+                />
+              </label>
             </div>
-          </div>
+            <div className="nutrition-manual-row nutrition-manual-row-three">
+              <label>
+                <span>Carb</span>
+                <input
+                  value={nutritionForm.carb}
+                  onChange={(event) => setNutritionForm((current) => ({ ...current, carb: event.target.value }))}
+                  inputMode="decimal"
+                  min="0"
+                  step="0.1"
+                />
+              </label>
+              <label>
+                <span>Pro</span>
+                <input
+                  value={nutritionForm.protein}
+                  onChange={(event) => setNutritionForm((current) => ({ ...current, protein: event.target.value }))}
+                  inputMode="decimal"
+                  min="0"
+                  step="0.1"
+                />
+              </label>
+              <label>
+                <span>Fat</span>
+                <input
+                  value={nutritionForm.fat}
+                  onChange={(event) => setNutritionForm((current) => ({ ...current, fat: event.target.value }))}
+                  inputMode="decimal"
+                  min="0"
+                  step="0.1"
+                />
+              </label>
+            </div>
+            <ModalActions onCancel={closeNutritionModal} submitText="추가" />
+          </form>
         </Modal>
       )}
 
