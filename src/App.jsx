@@ -196,6 +196,20 @@ export default function App() {
   const finishDayLongPressProps = useLongPress(() => setActionTarget({ type: "day" }));
 
   useEffect(() => {
+    const preventNumberInputWheel = (event) => {
+      const target = event.target;
+      if (!(target instanceof window.HTMLInputElement)) return;
+      if (target.type !== "number") return;
+      if (document.activeElement !== target) return;
+
+      event.preventDefault();
+    };
+
+    document.addEventListener("wheel", preventNumberInputWheel, { passive: false });
+    return () => document.removeEventListener("wheel", preventNumberInputWheel);
+  }, []);
+
+  useEffect(() => {
     if (!HAS_SUPABASE_CONFIG || !authSession) {
       setAuthChecking(false);
       return;
