@@ -724,7 +724,7 @@ export default function App() {
   }, [currentMemoSegment, memoCursorIsAttachedToWord]);
 
   const deferredMemoPreviewName = useDeferredValue(memoPreviewName);
-  const activeMemoPreviewName = memoPreviewName === deferredMemoPreviewName ? deferredMemoPreviewName : "";
+  const activeMemoPreviewName = memoPreviewName ? (deferredMemoPreviewName || memoPreviewName) : "";
   const savedPreviewFood = useMemo(
     () => activeMemoPreviewName ? findExactFoodByName(activeMemoPreviewName, customFoods) : null,
     [activeMemoPreviewName, customFoods]
