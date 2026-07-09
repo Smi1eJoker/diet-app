@@ -196,20 +196,6 @@ export default function App() {
   const finishDayLongPressProps = useLongPress(() => setActionTarget({ type: "day" }));
 
   useEffect(() => {
-    const preventNumberInputWheel = (event) => {
-      const target = event.target;
-      if (!(target instanceof window.HTMLInputElement)) return;
-      if (target.type !== "number") return;
-      if (document.activeElement !== target) return;
-
-      event.preventDefault();
-    };
-
-    document.addEventListener("wheel", preventNumberInputWheel, { passive: false });
-    return () => document.removeEventListener("wheel", preventNumberInputWheel);
-  }, []);
-
-  useEffect(() => {
     if (!HAS_SUPABASE_CONFIG || !authSession) {
       setAuthChecking(false);
       return;
@@ -2163,7 +2149,7 @@ export default function App() {
                 <input
                   value={myFoodForm.baseAmount}
                   onChange={(event) => setMyFoodForm((current) => ({ ...current, baseAmount: event.target.value }))}
-                  type="number"
+                  inputMode="numeric"
                   min="1"
                   step="1"
                   placeholder="예: 100"
@@ -2174,7 +2160,7 @@ export default function App() {
                 <input
                   value={myFoodForm.kcal}
                   onChange={(event) => setMyFoodForm((current) => ({ ...current, kcal: event.target.value }))}
-                  type="number"
+                  inputMode="numeric"
                   min="0"
                   step="1"
                 />
@@ -2186,7 +2172,7 @@ export default function App() {
                 <input
                   value={myFoodForm.carb}
                   onChange={(event) => setMyFoodForm((current) => ({ ...current, carb: event.target.value }))}
-                  type="number"
+                  inputMode="decimal"
                   min="0"
                   step="0.1"
                 />
@@ -2196,7 +2182,7 @@ export default function App() {
                 <input
                   value={myFoodForm.protein}
                   onChange={(event) => setMyFoodForm((current) => ({ ...current, protein: event.target.value }))}
-                  type="number"
+                  inputMode="decimal"
                   min="0"
                   step="0.1"
                 />
@@ -2206,7 +2192,7 @@ export default function App() {
                 <input
                   value={myFoodForm.fat}
                   onChange={(event) => setMyFoodForm((current) => ({ ...current, fat: event.target.value }))}
-                  type="number"
+                  inputMode="decimal"
                   min="0"
                   step="0.1"
                 />
@@ -2245,7 +2231,7 @@ export default function App() {
                 <input
                   value={myUnitForm.grams}
                   onChange={(event) => setMyUnitForm((current) => ({ ...current, grams: event.target.value }))}
-                  type="number"
+                  inputMode="decimal"
                   min="1"
                   step="1"
                   placeholder="예: 120"
@@ -2267,7 +2253,7 @@ export default function App() {
                 ref={unitAmountInputRef}
                 value={unitAmountInput}
                 onChange={(event) => setUnitAmountInput(event.target.value)}
-                type="number"
+                inputMode="decimal"
                 step="1"
                 min="0"
                 placeholder="예: 100"
@@ -2292,7 +2278,7 @@ export default function App() {
                 ref={amountInputRef}
                 value={amountInput}
                 onChange={(event) => setAmountInput(event.target.value)}
-                type="number"
+                inputMode="decimal"
                 step="10"
                 min="0"
                 placeholder="예: 230"
@@ -2358,7 +2344,7 @@ export default function App() {
                 ref={foodEditAmountRef}
                 value={foodEditForm.amount}
                 onChange={(event) => setFoodEditForm((current) => ({ ...current, amount: event.target.value }))}
-                type="number"
+                inputMode="decimal"
                 step="10"
                 min="0"
                 placeholder="예: 230"
@@ -2463,11 +2449,11 @@ function MorningWeightCard({ value, inputValue, onInputChange, onRegister, onLon
       ) : (
         <div className="weight-inline-input">
           <input
-            type="number"
             value={inputValue}
             min="30"
             max="200"
             step="0.1"
+            inputMode="decimal"
             placeholder="78.0"
             onChange={(event) => onInputChange(event.target.value)}
           />
@@ -2644,21 +2630,21 @@ function SetupScreen({ profile, onProfileChange, onSubmit }) {
           <div className="profile-row">
             <span className="row-icon">나</span>
             <strong>나이</strong>
-            <input type="number" value={profile.age} min="14" max="90" onChange={(event) => onProfileChange("age", event.target.value)} />
+            <input value={profile.age} min="14" max="90" inputMode="numeric" onChange={(event) => onProfileChange("age", event.target.value)} />
             <small>세</small>
           </div>
 
           <div className="profile-row">
             <span className="row-icon">키</span>
             <strong>키</strong>
-            <input type="number" value={profile.height} min="120" max="230" onChange={(event) => onProfileChange("height", event.target.value)} />
+            <input value={profile.height} min="120" max="230" inputMode="decimal" onChange={(event) => onProfileChange("height", event.target.value)} />
             <small>cm</small>
           </div>
 
           <div className="profile-row">
             <span className="row-icon">몸</span>
             <strong>체중</strong>
-            <input type="number" value={profile.weight} min="30" max="200" step="0.1" onChange={(event) => onProfileChange("weight", event.target.value)} />
+            <input value={profile.weight} min="30" max="200" step="0.1" inputMode="decimal" onChange={(event) => onProfileChange("weight", event.target.value)} />
             <small>kg</small>
           </div>
 
@@ -2734,11 +2720,11 @@ function NumberField({ label, unit, value, min, max, step = "1", onChange }) {
       <span>{label}</span>
       <div>
         <input
-          type="number"
           value={value || ""}
           min={min}
           max={max}
           step={step}
+          inputMode={step === "1" ? "numeric" : "decimal"}
           onChange={(event) => onChange(event.target.value)}
         />
         <small>{unit}</small>
@@ -2756,11 +2742,11 @@ function SetupInlineNumberField({ label, meta, unit, value, min, max, step = "1"
       </strong>
       <div className="setup-inline-control">
         <input
-          type="number"
           value={value || ""}
           min={min}
           max={max}
           step={step}
+          inputMode={step === "1" ? "numeric" : "decimal"}
           onChange={(event) => onChange(event.target.value)}
         />
         <small>{unit}</small>
@@ -2805,11 +2791,11 @@ function BodyCompositionField({ profile, onProfileChange }) {
           <strong>골격근량</strong>
           <div className="body-composition-control">
             <input
-              type="number"
               value={profile.muscleMass || ""}
               min="0"
               max="100"
               step="0.1"
+              inputMode="decimal"
               onChange={(event) => updateMuscleMass(event.target.value)}
             />
             <small>kg</small>
@@ -2820,11 +2806,11 @@ function BodyCompositionField({ profile, onProfileChange }) {
           <strong>체지방</strong>
           <div className="body-composition-control body-composition-fat-control">
             <input
-              type="number"
               value={bodyFatInputValue || ""}
               min="0"
               max={profile.bodyFatUnit === "percent" ? "70" : "140"}
               step="0.1"
+              inputMode="decimal"
               onChange={(event) => updateBodyFatValue(event.target.value)}
             />
             <select value={profile.bodyFatUnit || "kg"} onChange={(event) => onProfileChange("bodyFatUnit", event.target.value)}>
@@ -3008,7 +2994,6 @@ function PlanResultScreen({ plan, onPlanChange, onBack, onStart }) {
               <span>목표 칼로리</span>
               <div className="target-input-shell">
                 <input
-                  type="number"
                   value={targetForm.calorieGoal}
                   min="1"
                   step="1"
@@ -3164,7 +3149,6 @@ function TargetMacroInput({ label, value, unit, locked, onChange, onBlur, onTogg
       <span>{label}</span>
       <div className="target-input-shell">
         <input
-          type="number"
           value={value}
           min="0"
           step="1"
