@@ -4275,3 +4275,64 @@ textarea,
 .memo-time-input {
   padding-top: 0;
 }
+
+/* PT fixes v3: restore compact memo editor while allowing food text to wrap */
+.daily-memo-editor {
+  min-height: 190px;
+  padding: 12px;
+  align-content: start;
+  gap: 8px;
+}
+
+.daily-memo-row {
+  grid-template-columns: 58px minmax(0, 1fr);
+  gap: 9px;
+  align-items: start;
+  min-height: 28px;
+}
+
+.daily-memo-form .memo-time-input,
+.daily-memo-form .memo-food-input {
+  width: 100%;
+  min-width: 0;
+  min-height: 28px;
+  height: auto;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+  color: #f5f5f5;
+  outline: none;
+  resize: none;
+  font-family: Pretendard, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  font-size: 16px;
+  font-weight: 900;
+  line-height: 28px;
+  letter-spacing: 0;
+}
+
+.daily-memo-form .memo-time-input {
+  text-align: left;
+  font-variant-numeric: tabular-nums;
+}
+
+.daily-memo-form .memo-food-input {
+  overflow: hidden;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  word-break: keep-all;
+  text-overflow: clip;
+}
+
+.daily-memo-form .memo-time-input:focus,
+.daily-memo-form .memo-food-input:focus {
+  border: 0;
+  box-shadow: none;
+}
+
+.daily-memo-form .memo-time-input:disabled,
+.daily-memo-form .memo-food-input:disabled {
+  background: transparent;
+  color: #a3a3a3;
+}
