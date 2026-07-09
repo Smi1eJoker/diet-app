@@ -1,5 +1,7 @@
 import { formatMacro, toNumber } from "./nutrition";
 
+const foodSearchIndexCache = new WeakMap();
+
 export function toFoodEntry(row, fallbackId) {
   const raw = row.raw_foods || row.raw_food || {};
   const isAppFood = row.display_name || row.app_food_id;
@@ -606,6 +608,45 @@ export function getFoodExactKeys(food) {
     .filter(Boolean);
 }
 
+function createFoodSearchEntry(food) {
+  const searchableNames = getFoodSearchableNames(food);
+  const searchTerms = getFoodSearchTermEntries(food);
+  const searchTermNames = searchTerms.map((term) => term.normalized);
+
+  return {
+    food,
+    exactKeys: getFoodExactKeys(food),
+    searchableNames,
+    searchTerms,
+    searchTermNames,
+    allSearchableNames: [...searchableNames, ...searchTermNames].filter(Boolean),
+    displayName: getFoodDisplayName(food),
+  };
+}
+
+function getFoodSearchIndex(customFoods) {
+  if (!customFoods || typeof customFoods !== "object") return [];
+
+  const cachedIndex = foodSearchIndexCache.get(customFoods);
+  if (cachedIndex) return cachedIndex;
+
+  const index = getFoodPool(customFoods)
+    .filter(Boolean)
+    .map(createFoodSearchEntry);
+
+  foodSearchIndexCache.set(customFoods, index);
+  return index;
+}
+
+function createFoodQueryContext(normalizedName) {
+  const queryTokens = getFoodSearchTokens(normalizedName);
+
+  return {
+    allowLooseSearch: isLooseFoodSearchAllowed(normalizedName),
+    meaningfulTokens: queryTokens.filter((token) => token.length >= 2 || queryTokens.length >= 2),
+  };
+}
+
 export function findExactFoodByName(name, customFoods) {
   const normalizedName = normalize(cleanFoodName(name));
   if (!normalizedName) return null;
@@ -619,9 +660,9 @@ export function findExactFoodByName(name, customFoods) {
     };
   }
 
-  const exactFood = getFoodPool(customFoods).find((food) =>
-    getFoodExactKeys(food).includes(normalizedName)
-  );
+  const exactFood = getFoodSearchIndex(customFoods).find((entry) =>
+    entry.exactKeys.includes(normalizedName)
+  )?.food;
 
   return exactFood
     ? {
@@ -658,11 +699,10 @@ export function isLooseFoodSearchAllowed(normalizedName) {
   return normalizedName.length >= 2 || normalizedName === "밥";
 }
 
-export function getFoodMatchInfo(food, normalizedName) {
-  const searchableNames = getFoodSearchableNames(food);
-  const searchTerms = getFoodSearchTermEntries(food);
-  const searchTermNames = searchTerms.map((term) => term.normalized);
-  const allSearchableNames = [...searchableNames, ...searchTermNames].filter(Boolean);
+function getFoodMatchInfoFromEntry(entry, normalizedName, queryContext = createFoodQueryContext(normalizedName)) {
+  const searchableNames = entry.searchableNames;
+  const searchTerms = entry.searchTerms;
+  const allSearchableNames = entry.allSearchableNames;
 
   if (searchableNames.includes(normalizedName)) {
     return { score: 0, weight: 1000, reason: "exact-name" };
@@ -673,7 +713,7 @@ export function getFoodMatchInfo(food, normalizedName) {
     return { score: 1, weight: exactTerm.weight + 500, reason: "search-term-exact" };
   }
 
-  const allowLooseSearch = isLooseFoodSearchAllowed(normalizedName);
+  const allowLooseSearch = queryContext.allowLooseSearch;
 
   if (allowLooseSearch && searchableNames.some((name) => name.startsWith(normalizedName))) {
     return { score: 10, weight: 200, reason: "name-starts-with" };
@@ -697,12 +737,11 @@ export function getFoodMatchInfo(food, normalizedName) {
     return { score: 30, weight: 80, reason: "query-includes-name" };
   }
 
-  const queryTokens = getFoodSearchTokens(normalizedName);
-  const meaningfulTokens = queryTokens.filter((token) => token.length >= 2 || queryTokens.length >= 2);
+  const meaningfulTokens = queryContext.meaningfulTokens;
 
   if (meaningfulTokens.length > 0) {
     const matchedTokens = meaningfulTokens.filter((token) =>
-      allSearchableNames.some((name) => name.includes(normalize(token)))
+      allSearchableNames.some((name) => name.includes(token))
     );
 
     // 토큰 2개 이상이 맞으면 꽤 강한 후보로 본다. 예: 가슴살 -> 닭 + 가슴.
@@ -727,6 +766,10 @@ export function getFoodMatchInfo(food, normalizedName) {
   return null;
 }
 
+export function getFoodMatchInfo(food, normalizedName) {
+  return getFoodMatchInfoFromEntry(createFoodSearchEntry(food), normalizedName, createFoodQueryContext(normalizedName));
+}
+
 export function dedupeFoodMatches(matches) {
   const seen = new Set();
   const deduped = [];
@@ -744,47 +787,81 @@ export function dedupeFoodMatches(matches) {
   return deduped;
 }
 
-export function findFoodMatches(name, customFoods) {
+function compareFoodMatches(a, b) {
+  if (a.matchScore !== b.matchScore) return a.matchScore - b.matchScore;
+  if (a.matchWeight !== b.matchWeight) return b.matchWeight - a.matchWeight;
+
+  const aPriority = toNumber(a.searchPriority);
+  const bPriority = toNumber(b.searchPriority);
+  if (aPriority !== bPriority) return bPriority - aPriority;
+
+  const aDisplay = normalize(a.displayName || getFoodDisplayName(a));
+  const bDisplay = normalize(b.displayName || getFoodDisplayName(b));
+  return aDisplay.length - bDisplay.length;
+}
+
+function getMatchLimit(options) {
+  const rawLimit = typeof options === "number" ? options : options?.limit;
+  const limit = Number(rawLimit);
+
+  return Number.isFinite(limit) && limit > 0 ? Math.floor(limit) : 0;
+}
+
+function pruneFoodMatches(matches, limit) {
+  if (!limit || matches.length <= limit * 8) return;
+  matches.sort(compareFoodMatches);
+  matches.length = limit * 4;
+}
+
+export function findFoodMatches(name, customFoods, options = {}) {
   const normalizedName = normalize(name);
   if (!normalizedName) return [];
 
-  const matches = getFoodPool(customFoods)
-    .map((food) => {
-      const match = getFoodMatchInfo(food, normalizedName);
-      return match
-        ? {
-            ...food,
-            matchScore: match.score,
-            matchWeight: match.weight,
-            matchReason: match.reason,
-          }
-        : null;
-    })
-    .filter(Boolean)
-    .sort((a, b) => {
-      if (a.matchScore !== b.matchScore) return a.matchScore - b.matchScore;
-      if (a.matchWeight !== b.matchWeight) return b.matchWeight - a.matchWeight;
+  if (!isLooseFoodSearchAllowed(normalizedName)) {
+    const exactFood = findExactFoodByName(normalizedName, customFoods);
+    return exactFood ? [exactFood] : [];
+  }
 
-      const aPriority = toNumber(a.searchPriority);
-      const bPriority = toNumber(b.searchPriority);
-      if (aPriority !== bPriority) return bPriority - aPriority;
+  const limit = getMatchLimit(options);
+  const matches = [];
+  const queryContext = createFoodQueryContext(normalizedName);
 
-      const aDisplay = normalize(getFoodDisplayName(a));
-      const bDisplay = normalize(getFoodDisplayName(b));
-      return aDisplay.length - bDisplay.length;
+  getFoodSearchIndex(customFoods).forEach((entry) => {
+    const match = getFoodMatchInfoFromEntry(entry, normalizedName, queryContext);
+    if (!match) return;
+
+    matches.push({
+      ...entry.food,
+      displayName: entry.displayName,
+      matchScore: match.score,
+      matchWeight: match.weight,
+      matchReason: match.reason,
     });
 
-  return dedupeFoodMatches(matches);
+    pruneFoodMatches(matches, limit);
+  });
+
+  matches.sort(compareFoodMatches);
+  const dedupedMatches = dedupeFoodMatches(matches);
+
+  return limit ? dedupedMatches.slice(0, limit) : dedupedMatches;
 }
 
-export function findFoodMatchesExpanded(name, customFoods) {
+export function findFoodMatchesExpanded(name, customFoods, options = {}) {
   if (!normalize(name)) return [];
 
+  const limit = getMatchLimit(options);
   const exactFood = findExactFoodByName(name, customFoods);
-  const expandedMatches = getFoodCandidateSearchNames(name)
-    .flatMap((searchName) => findFoodMatches(searchName, customFoods));
+  const matches = exactFood ? [exactFood] : [];
 
-  return dedupeFoodMatches([exactFood, ...expandedMatches].filter(Boolean));
+  getFoodCandidateSearchNames(name).some((searchName) => {
+    matches.push(...findFoodMatches(searchName, customFoods, limit ? { limit: Math.max(limit * 2, 8) } : {}));
+
+    return limit && dedupeFoodMatches(matches).length >= limit;
+  });
+
+  const dedupedMatches = dedupeFoodMatches(matches.filter(Boolean));
+  return limit ? dedupedMatches.slice(0, limit) : dedupedMatches;
 }
 
 export function getFoodPreviewTitle(food) {

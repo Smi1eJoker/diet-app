@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 import "./App.css";
 import { DEFAULT_PROFILE, GOAL_OPTIONS, JOB_ACTIVITY_OPTIONS, MEMO_EXAMPLE_ROWS } from "./constants/app";
 import {
@@ -59,10 +59,8 @@ import {
   dedupeFoodMatches,
   findExactFoodByName,
   findFoodByName,
-  findFoodMatches,
   findFoodMatchesExpanded,
   getFoodBasisSnapshotFromItem,
-  getFoodCandidateSearchNames,
   getFoodDisplayName,
   getFoodMatchKey,
   getManagedUserAliases,
@@ -101,6 +99,32 @@ import {
   splitDailyMemoRows,
 } from "./utils/foodParser";
 import useLongPress from "./hooks/useLongPress";
+
+const MEMO_PREVIEW_FOOD_LIMIT = 5;
+
+function hasQuantityInMemoSegment(segment) {
+  const tokens = String(segment || "").trim().split(/\s+/).filter(Boolean);
+  if (tokens.length === 0) return false;
+
+  return tokens.some((token, index) => {
+    const previousToken = tokens[index - 1] || "";
+
+    if (/^[0-9]+(?:\.[0-9]+)?$/i.test(token)) return true;
+    if (/^[0-9]+(?:\.[0-9]+)?(?:g|그램)$/i.test(token)) return true;
+    if (/^(g|그램)$/i.test(token) && /^[0-9]+(?:\.[0-9]+)?$/i.test(previousToken)) return true;
+
+    const compactUnit = parseQuantityUnitToken(token);
+    if (compactUnit?.quantity > 0 && compactUnit.unitText) return true;
+
+    const separatedUnit = index > 0 ? parseQuantityUnitTokens(previousToken, token) : null;
+    if (separatedUnit?.quantity > 0 && separatedUnit.unitText) return true;
+
+    const attachedUnit = parseAttachedFoodUnitToken(token);
+    if (attachedUnit?.quantity > 0 && attachedUnit.unitText) return true;
+
+    return false;
+  });
+}
 
 export default function App() {
   const [authSession, setAuthSession] = useState(() => loadStoredSession());
@@ -690,43 +714,21 @@ export default function App() {
     .slice(Math.max(currentMemoBeforeCursor.lastIndexOf(","), currentMemoBeforeCursor.lastIndexOf("，")) + 1);
   const currentMemoSegment = currentMemoSegmentRaw.trim();
 
-  const hasQuantityInMemoSegment = (segment) => {
-    const tokens = String(segment || "").trim().split(/\s+/).filter(Boolean);
-    if (tokens.length === 0) return false;
-
-    return tokens.some((token, index) => {
-      const previousToken = tokens[index - 1] || "";
-
-      if (/^[0-9]+(?:\.[0-9]+)?$/i.test(token)) return true;
-      if (/^[0-9]+(?:\.[0-9]+)?(?:g|그램)$/i.test(token)) return true;
-      if (/^(g|그램)$/i.test(token) && /^[0-9]+(?:\.[0-9]+)?$/i.test(previousToken)) return true;
-
-      const compactUnit = parseQuantityUnitToken(token);
-      if (compactUnit?.quantity > 0 && compactUnit.unitText) return true;
-
-      const separatedUnit = index > 0 ? parseQuantityUnitTokens(previousToken, token) : null;
-      if (separatedUnit?.quantity > 0 && separatedUnit.unitText) return true;
-
-      const attachedUnit = parseAttachedFoodUnitToken(token);
-      if (attachedUnit?.quantity > 0 && attachedUnit.unitText) return true;
-
-      return false;
-    });
-  };
-
-  const getMemoPreviewName = () => {
+  const memoPreviewName = useMemo(() => {
     if (!memoCursorIsAttachedToWord) return "";
     if (!currentMemoSegment) return "";
     if (hasQuantityInMemoSegment(currentMemoSegment)) return "";
     if (/^\d{1,2}:?\d{0,2}$/.test(currentMemoSegment)) return "";
 
     return cleanFoodName(currentMemoSegment);
-  };
+  }, [currentMemoSegment, memoCursorIsAttachedToWord]);
 
-  const memoPreviewName = getMemoPreviewName();
-  const savedPreviewFood = memoPreviewName
-    ? findExactFoodByName(memoPreviewName, customFoods)
-    : null;
+  const deferredMemoPreviewName = useDeferredValue(memoPreviewName);
+  const activeMemoPreviewName = memoPreviewName === deferredMemoPreviewName ? deferredMemoPreviewName : "";
+  const savedPreviewFood = useMemo(
+    () => activeMemoPreviewName ? findExactFoodByName(activeMemoPreviewName, customFoods) : null,
+    [activeMemoPreviewName, customFoods]
+  );
 
   const isSavedAliasPreviewFood = (food) => {
     if (!savedPreviewFood || !food) return false;
@@ -737,21 +739,15 @@ export default function App() {
     return sameId || sameBasis;
   };
 
-  const memoPreviewSearchNames = memoPreviewName
-    ? typeof getFoodCandidateSearchNames === "function"
-      ? getFoodCandidateSearchNames(memoPreviewName)
-      : [memoPreviewName]
-    : [];
-
-  const memoPreviewFoods = memoPreviewName
-    ? dedupeFoodMatches([
-        ...(savedPreviewFood ? [savedPreviewFood] : []),
-        ...memoPreviewSearchNames.flatMap((name) => findFoodMatches(name, customFoods)),
-      ])
-    : [];
+  const memoPreviewFoods = useMemo(
+    () => activeMemoPreviewName
+      ? findFoodMatchesExpanded(activeMemoPreviewName, customFoods, { limit: MEMO_PREVIEW_FOOD_LIMIT })
+      : [],
+    [activeMemoPreviewName, customFoods]
+  );
 
   const showMemoDbPreview = Boolean(
-    memoPreviewName &&
+    activeMemoPreviewName &&
       activeMemoRow.foods.trim() &&
       !memoPreviewHidden
   );
@@ -1636,14 +1632,14 @@ export default function App() {
   };
 
   const openMemoMatchChoice = (food) => {
-    if (!memoPreviewName || !food) return;
+    if (!activeMemoPreviewName || !food) return;
     const segmentIndex = getMemoSegmentIndex(activeMemoRow.foods, activeFoodCursor);
     setMatchChoiceTarget({
       source: "memo",
       rowIndex: activeMemoRowIndex,
       segmentIndex,
       entryIndex: 0,
-      aliasName: memoPreviewName,
+      aliasName: activeMemoPreviewName,
       food,
     });
   };
