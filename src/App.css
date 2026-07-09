@@ -4171,3 +4171,78 @@ textarea,
     padding-inline: 10px;
   }
 }
+
+.target-calorie-title-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.target-help-button {
+  width: 28px;
+  height: 28px;
+  display: inline-grid;
+  place-items: center;
+  border: 1px solid #3a3a3a;
+  border-radius: 50%;
+  background: #181818;
+  color: #f5f5f5;
+  font-size: 14px;
+  font-weight: 900;
+  line-height: 1;
+}
+
+.target-help-button:active {
+  transform: scale(0.96);
+}
+
+.target-formula-modal .modal-card,
+.modal-card.target-formula-modal {
+  max-height: min(82vh, 640px);
+  overflow-y: auto;
+}
+
+.formula-explain {
+  display: grid;
+  gap: 12px;
+}
+
+.formula-explain p {
+  margin: 0;
+  color: #cfcfcf;
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 1.55;
+}
+
+.formula-explain p strong {
+  color: #f5f5f5;
+}
+
+.formula-summary-box {
+  display: grid;
+  gap: 6px;
+  padding: 12px;
+  border: 1px solid #303030;
+  border-radius: 12px;
+  background: #181818;
+}
+
+.formula-summary-box span {
+  color: #a3a3a3;
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.formula-summary-box strong {
+  color: #66e36f;
+  font-size: 13px;
+  font-weight: 900;
+  line-height: 1.45;
+}
+
+.formula-detail-list {
+  display: grid;
+  gap: 0;
+  padding: 0 2px;
+}

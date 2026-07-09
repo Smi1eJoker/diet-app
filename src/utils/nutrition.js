@@ -167,7 +167,7 @@ export function buildNutritionPlan(profile) {
   const job = JOB_ACTIVITY_OPTIONS.find((option) => option.value === (data.jobActivity || FALLBACK_PROFILE.jobActivity)) || JOB_ACTIVITY_OPTIONS[1];
   const leanMass = data.bodyFatMass > 0 ? clamp(data.weight - data.bodyFatMass, data.weight * 0.35, data.weight) : 0;
   const bmr = getMifflinBmr(data);
-  const effectiveSteps = data.steps > 0 ? data.steps : job.defaultSteps;
+  const effectiveSteps = job.defaultSteps;
   const livingCalories = LIVING_CALORIES;
   const stepCalories = getStepCalories(effectiveSteps);
   const weightCalories = getWeightTrainingCalories(data.weightSessions);

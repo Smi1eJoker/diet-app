@@ -42,7 +42,6 @@ import {
   cleanIntegerInput,
   formatAmount,
   formatMacro,
-  getActivityBySteps,
   getGapTone,
   getMacroIntakeStatus,
   getMacroCalorieGap,
@@ -286,7 +285,11 @@ export default function App() {
         }
 
         if (appState?.nutrition_plan && Object.keys(appState.nutrition_plan).length > 0) {
-          setNutritionPlan(appState.nutrition_plan);
+          const recalculatedPlan = buildNutritionPlan({ ...DEFAULT_PROFILE, ...(appState.profile || DEFAULT_PROFILE) });
+          const savedPlan = appState.nutrition_plan;
+          const shouldUseSavedManualTarget = Boolean(savedPlan.isManualTarget);
+
+          setNutritionPlan(shouldUseSavedManualTarget ? savedPlan : recalculatedPlan);
         }
 
         if (appState?.setup_screen) {
@@ -2593,12 +2596,6 @@ function BottomNav({ activeTab, onChange }) {
 function SetupScreen({ profile, onProfileChange, onSubmit }) {
   const canCalculate = isRequiredProfileFilled(profile);
 
-  const handleStepsChange = (value) => {
-    onProfileChange("steps", value);
-    const nextActivity = getActivityBySteps(value);
-    if (nextActivity) onProfileChange("jobActivity", nextActivity);
-  };
-
   return (
     <main className="setup-shell setup-calculator-shell">
       <section className="daily-calc-hero">
@@ -2672,22 +2669,11 @@ function SetupScreen({ profile, onProfileChange, onSubmit }) {
                 selected={profile.jobActivity === option.value}
                 onSelect={() => {
                   onProfileChange("jobActivity", option.value);
-                  onProfileChange("steps", String(option.defaultSteps));
+                  onProfileChange("steps", "");
                 }}
               />
             ))}
           </div>
-
-          <SetupInlineNumberField
-            label="평균 걸음 수"
-            meta="선택"
-            unit="보/일"
-            value={profile.steps}
-            min="0"
-            max="40000"
-            step="1"
-            onChange={handleStepsChange}
-          />
 
           <SetupInlineNumberField
             label="웨이트 주 횟수"
@@ -2848,7 +2834,6 @@ function ActivityOptionCard({ option, selected, onSelect }) {
         <strong>{option.label}</strong>
         <small>{option.description}</small>
       </div>
-      <em>{option.stepsLabel}</em>
       {selected && <i>✓</i>}
     </button>
   );
@@ -2873,6 +2858,7 @@ function PlanResultScreen({ plan, onPlanChange, onBack, onStart }) {
   });
 
   const [isEditingTargets, setIsEditingTargets] = useState(false);
+  const [isFormulaOpen, setIsFormulaOpen] = useState(false);
   const [targetForm, setTargetForm] = useState(() => createTargetForm(plan));
   const [targetLocks, setTargetLocks] = useState({ carb: false, protein: false, fat: false });
   const [autoBalance, setAutoBalance] = useState(true);
@@ -2905,6 +2891,16 @@ function PlanResultScreen({ plan, onPlanChange, onBack, onStart }) {
   const targetGuideText = plan.isManualTarget
     ? "수정한 목표가 기록창과 통계창에 반영됩니다."
     : plan.guide;
+  const goalMultiplierText = plan.isManualTarget
+    ? "사용자 직접 수정"
+    : plan.goalLabel === "벌크"
+      ? "× 1.08"
+      : plan.goalLabel === "감량"
+        ? "× 0.83"
+        : "× 1.00";
+  const calorieFormulaText = plan.isManualTarget
+    ? "사용자가 직접 수정한 목표 칼로리입니다."
+    : `(${plan.details.bmr.toLocaleString()} + ${plan.details.activityCalories.toLocaleString()} + ${plan.details.tef.toLocaleString()}) ${goalMultiplierText} = ${plan.calorieGoal.toLocaleString()} kcal`;
 
   const updateTargetInput = (field, value) => {
     const cleanValue = cleanIntegerInput(value);
@@ -2964,7 +2960,12 @@ function PlanResultScreen({ plan, onPlanChange, onBack, onStart }) {
         <div className="result-hero-top">
           <div className="result-target-copy">
             <span>하루 목표 칼로리</span>
-            <strong>{plan.calorieGoal.toLocaleString()} kcal</strong>
+            <div className="target-calorie-title-row">
+              <strong>{plan.calorieGoal.toLocaleString()} kcal</strong>
+              <button className="target-help-button" type="button" onClick={() => setIsFormulaOpen(true)} aria-label="목표 칼로리 계산 설명 보기">
+                ?
+              </button>
+            </div>
           </div>
           <div className="result-hero-actions">
             <em>{plan.isManualTarget ? "사용자 지정" : plan.goalLabel}</em>
@@ -3111,6 +3112,32 @@ function PlanResultScreen({ plan, onPlanChange, onBack, onStart }) {
         <DetailRow label="체중" value={formatMacro(plan.profile.weight) + " kg"} />
         <DetailRow label="골격근량" value={plan.profile.muscleMass > 0 ? formatMacro(plan.profile.muscleMass) + " kg" : "미입력"} />
       </section>
+
+      {isFormulaOpen && (
+        <Modal title="목표 칼로리 계산 기준" onClose={() => setIsFormulaOpen(false)} className="target-formula-modal">
+          <div className="formula-explain">
+            <p>
+              목표 칼로리는 <strong>기초대사량 + 활동 소모량 + 소화 소모량</strong>으로 유지 칼로리를 구한 뒤,
+              선택한 목표에 따라 보정해서 산출해요.
+            </p>
+            <div className="formula-summary-box">
+              <span>계산식</span>
+              <strong>{calorieFormulaText}</strong>
+            </div>
+            <div className="formula-detail-list">
+              <DetailRow label="기초대사량(BMR)" value={plan.details.bmr.toLocaleString() + " kcal"} />
+              <DetailRow label="활동 소모량" value={plan.details.activityCalories.toLocaleString() + " kcal"} />
+              <DetailRow label="소화 소모량(TEF)" value={plan.details.tef.toLocaleString() + " kcal"} />
+              <DetailRow label="유지 칼로리(TDEE)" value={plan.details.tdee.toLocaleString() + " kcal"} />
+              <DetailRow label="목표 보정" value={plan.isManualTarget ? "사용자 수정" : plan.goalLabel + " " + goalMultiplierText} />
+              <DetailRow label="최종 목표" value={plan.calorieGoal.toLocaleString() + " kcal"} />
+            </div>
+            <p className="modal-hint">
+              이 값은 초기 추정치이고, 7일 평균 공복 체중 변화에 따라 자동으로 +150/-150kcal 보정돼요.
+            </p>
+          </div>
+        </Modal>
+      )}
 
       <div className="result-actions">
         <button className="ghost-button" type="button" onClick={onBack}>다시 입력</button>

@@ -35,51 +35,51 @@ export const FALLBACK_PROFILE = {
 };
 
 export const GOAL_OPTIONS = {
-  lose: { label: "감량", multiplier: 0.83, tone: "calm", helper: "체중 감소" },
+  lose: { label: "감량", multiplier: 0.85, tone: "calm", helper: "체중 감소" },
   maintain: { label: "유지", multiplier: 1, tone: "good", helper: "현재 체중 유지" },
-  bulk: { label: "벌크", multiplier: 1.08, tone: "strong", helper: "체중 증가" },
+  bulk: { label: "벌크", multiplier: 1.1, tone: "strong", helper: "체중 증가" },
 };
 
 export const JOB_ACTIVITY_OPTIONS = [
   {
     value: "sedentary",
     label: "거의 앉아 있음",
-    description: "하루 대부분 앉아서 생활, 운동 거의 없음",
-    stepsLabel: "3,000보 이하",
+    description: "사무직, 학생처럼 하루 대부분 앉아서 생활",
+    stepsLabel: "낮은 생활 활동",
     defaultSteps: 2500,
     kcal: 0,
   },
   {
     value: "light",
     label: "가볍게 움직임",
-    description: "가벼운 이동이 있는 생활",
-    stepsLabel: "3,000 ~ 7,000보",
+    description: "앉아 있는 시간이 많지만 일상 이동이 약간 있음",
+    stepsLabel: "가벼운 생활 활동",
     defaultSteps: 5000,
-    kcal: 100,
+    kcal: 120,
   },
   {
     value: "moderate",
     label: "보통 활동적",
-    description: "일상 이동이 많은 편",
-    stepsLabel: "7,000 ~ 10,000보",
+    description: "일상 이동이 많거나 서 있는 시간이 있는 편",
+    stepsLabel: "보통 생활 활동",
     defaultSteps: 8500,
-    kcal: 150,
+    kcal: 260,
   },
   {
     value: "high",
     label: "많이 움직임",
-    description: "서서 일하거나 이동이 많은 생활",
+    description: "서서 일하거나 이동이 많고, 주 4~6회 운동",
     stepsLabel: "10,000 ~ 15,000보",
     defaultSteps: 12500,
-    kcal: 250,
+    kcal: 420,
   },
   {
     value: "physical",
     label: "육체노동 수준",
-    description: "무거운 작업이 포함된 활동, 매우 높은 활동량",
-    stepsLabel: "15,000보 이상",
+    description: "무거운 물건을 들거나 강한 신체활동이 많은 직업",
+    stepsLabel: "매우 높은 생활 활동",
     defaultSteps: 16000,
-    kcal: 400,
+    kcal: 620,
   },
 ];
 
