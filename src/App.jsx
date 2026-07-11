@@ -175,6 +175,263 @@ function getExternalFoodMetaText(food) {
   return [food?.maker, food?.category, food?.sourceLabel || "외부 음식 DB"].filter(Boolean).join(" · ");
 }
 
+const TRAINING_GOALS = {
+  strength: { label: "스트렝스", repMin: 3, repMax: 6, targetRir: 2, firstLoadRatio: 0.8 },
+  hypertrophy: { label: "근비대", repMin: 6, repMax: 15, targetRir: 2, firstLoadRatio: 0.7 },
+  endurance: { label: "근지구력", repMin: 15, repMax: 30, targetRir: 2, firstLoadRatio: 0.55 },
+};
+
+function normalizeExerciseName(value) {
+  return String(value || "")
+    .trim()
+    .toLowerCase()
+    .replace(/[()\[\]{}]/g, "")
+    .replace(/[·ㆍ.,/\\_-]/g, "")
+    .replace(/\s+/g, "");
+}
+
+function getCoreLiftKey(name) {
+  const normalizedName = normalizeExerciseName(name);
+  const aliases = {
+    squat: ["스쿼트", "백스쿼트", "바벨스쿼트", "backsquat", "squat"],
+    bench: ["벤치프레스", "바벨벤치프레스", "플랫벤치프레스", "benchpress", "bench"],
+    deadlift: ["데드리프트", "컨벤셔널데드리프트", "conventionaldeadlift", "deadlift"],
+    ohp: ["ohp", "오버헤드프레스", "밀리터리프레스", "바벨오버헤드프레스", "overheadpress"],
+  };
+
+  return Object.entries(aliases).find(([, names]) => names.includes(normalizedName))?.[0] || "";
+}
+
+function getExerciseIncrement(name) {
+  const coreLift = getCoreLiftKey(name);
+  if (coreLift === "squat" || coreLift === "deadlift") return 5;
+  return 2.5;
+}
+
+function roundToIncrement(value, increment = 2.5) {
+  if (!Number.isFinite(value) || value <= 0) return 0;
+  return Math.max(increment, Math.round(value / increment) * increment);
+}
+
+function parseWorkoutSetLine(line) {
+  const match = String(line || "").trim().match(
+    /^(\d+(?:\.\d+)?)\s*(?:kg)?\s*(?:[x×*]\s*)?(\d+)(?:\s*(?:@|rir\s*)(\d+(?:\.\d+)?))?$/i
+  );
+  if (!match) return null;
+
+  return {
+    weight: Number(match[1]),
+    reps: Number(match[2]),
+    rir: match[3] === undefined ? null : Number(match[3]),
+  };
+}
+
+function parseWorkoutMemo(value) {
+  const exercises = [];
+  let currentExercise = null;
+
+  String(value || "").split(/\r?\n/).forEach((rawLine) => {
+    const line = rawLine.trim();
+    if (!line) return;
+
+    const parsedSet = parseWorkoutSetLine(line);
+    if (parsedSet && currentExercise) {
+      currentExercise.sets.push(parsedSet);
+      return;
+    }
+
+    if (!parsedSet) {
+      currentExercise = {
+        id: "exercise-" + normalizeExerciseName(line),
+        name: line,
+        sets: [],
+      };
+      exercises.push(currentExercise);
+    }
+  });
+
+  return exercises;
+}
+
+function formatWorkoutNumber(value) {
+  return Number.isInteger(Number(value)) ? String(Number(value)) : String(Number(value).toFixed(1)).replace(/\.0$/, "");
+}
+
+function formatWorkoutMemo(exercises) {
+  return (exercises || [])
+    .map((exercise) => [
+      exercise.name,
+      ...(exercise.sets || []).map((set) => {
+        const rirText = set.rir === null || set.rir === undefined ? "" : " @" + formatWorkoutNumber(set.rir);
+        return `${formatWorkoutNumber(set.weight)} ${set.reps}${rirText}`;
+      }),
+    ].join("\n"))
+    .join("\n\n");
+}
+
+function findPreviousExercise(dailyRecords, selectedDateKey, exerciseName) {
+  const targetName = normalizeExerciseName(exerciseName);
+  const earlierDateKeys = Object.keys(dailyRecords || {})
+    .filter((dateKey) => dateKey < selectedDateKey)
+    .sort((a, b) => b.localeCompare(a));
+
+  for (const dateKey of earlierDateKeys) {
+    const entries = dailyRecords[dateKey]?.workoutEntries;
+    const match = Array.isArray(entries)
+      ? entries.find((entry) => normalizeExerciseName(entry.name) === targetName && entry.sets?.length > 0)
+      : null;
+    if (match) return { ...match, dateKey };
+  }
+
+  return null;
+}
+
+function getExerciseSetting(profile, exerciseName) {
+  const exerciseKey = normalizeExerciseName(exerciseName);
+  const savedSetting = profile.exerciseSettings?.[exerciseKey] || {};
+  const trainingGoal = savedSetting.trainingGoal || profile.trainingGoal || "hypertrophy";
+
+  return {
+    trainingGoal,
+    progressionMode: savedSetting.progressionMode || profile.progressionMode || "reps",
+    ...(TRAINING_GOALS[trainingGoal] || TRAINING_GOALS.hypertrophy),
+  };
+}
+
+function calculateSetE1RM(set) {
+  if (!set || set.weight <= 0 || set.reps <= 0 || set.reps > 10) return 0;
+  const safeRir = set.rir === null || set.rir === undefined ? 0 : Math.max(0, Math.min(4, set.rir));
+  return set.weight * (1 + (set.reps + safeRir) / 30);
+}
+
+function calculateExerciseE1RM(exercise) {
+  if (!getCoreLiftKey(exercise?.name)) return 0;
+  return Math.max(0, ...(exercise?.sets || []).map(calculateSetE1RM));
+}
+
+function estimateSetRIR(set, reference1RM) {
+  if (!set || reference1RM <= 0 || set.weight <= 0 || set.reps <= 0) return null;
+  const estimatedMaxReps = 30 * (reference1RM / set.weight - 1);
+  return Math.max(0, Math.min(5, Math.round(estimatedMaxReps - set.reps)));
+}
+
+function getProfile1RM(profile, exerciseName) {
+  const coreLift = getCoreLiftKey(exerciseName);
+  if (!coreLift) return 0;
+  const fieldMap = { squat: "squat1RM", bench: "bench1RM", deadlift: "deadlift1RM", ohp: "ohp1RM" };
+  return toNumber(profile[fieldMap[coreLift]]);
+}
+
+function getFirstLoadGuide(profile, exerciseName) {
+  const oneRm = getProfile1RM(profile, exerciseName);
+  if (oneRm <= 0) return null;
+  const setting = getExerciseSetting(profile, exerciseName);
+  const increment = getExerciseIncrement(exerciseName);
+  return {
+    weight: roundToIncrement(oneRm * setting.firstLoadRatio, increment),
+    reps: setting.repMin,
+    label: `${setting.label} 시작 기준`,
+  };
+}
+
+function buildExerciseRecommendation(previous, profile) {
+  if (!previous?.sets?.length) return null;
+
+  const setting = getExerciseSetting(profile, previous.name);
+  const increment = getExerciseIncrement(previous.name);
+  const sets = previous.sets.map((set) => ({ ...set }));
+  const rirValues = sets.map((set) => set.rir).filter((rir) => rir !== null && rir !== undefined);
+  const hasAllRir = rirValues.length === sets.length;
+  const tooHard = hasAllRir && rirValues.some((rir) => rir < Math.max(0, setting.targetRir - 1));
+
+  if (tooHard) {
+    return {
+      type: "hold",
+      label: "이전 기록 유지",
+      reason: `목표 RIR ${setting.targetRir}보다 여유가 적어 이번에는 중량과 반복수를 유지해요.`,
+      sets,
+      setting,
+    };
+  }
+
+  if (setting.progressionMode === "load") {
+    const nextSets = sets.map((set) => {
+      const nextWeight = roundToIncrement(set.weight + increment, increment);
+      const setE1RM = calculateSetE1RM(set);
+      const predictedReps = getCoreLiftKey(previous.name) && setE1RM > 0
+        ? Math.floor(30 * (setE1RM / nextWeight - 1) - setting.targetRir)
+        : set.reps - 2;
+
+      return {
+        ...set,
+        weight: nextWeight,
+        reps: Math.max(setting.repMin, Math.min(setting.repMax, predictedReps)),
+        rir: setting.targetRir,
+      };
+    });
+
+    return {
+      type: "load",
+      label: `중량 +${formatWorkoutNumber(increment)}kg`,
+      reason: `중량 증가 방식을 선택해 최소 증량 단위만 올리고 ${setting.label} 반복 범위에 맞췄어요.`,
+      sets: nextSets,
+      setting,
+    };
+  }
+
+  const reachedRepCeiling = sets.every((set) => set.reps >= setting.repMax);
+  if (reachedRepCeiling) {
+    return {
+      type: "load",
+      label: `중량 +${formatWorkoutNumber(increment)}kg`,
+      reason: `모든 세트가 반복 상한 ${setting.repMax}회에 도달해 중량을 올리고 반복 하한으로 돌아가요.`,
+      sets: sets.map((set) => ({
+        ...set,
+        weight: roundToIncrement(set.weight + increment, increment),
+        reps: setting.repMin,
+        rir: setting.targetRir,
+      })),
+      setting,
+    };
+  }
+
+  const nextSets = sets.map((set) => ({ ...set }));
+  const hasExtraReserve = hasAllRir && Math.min(...rirValues) >= setting.targetRir + 1;
+
+  if (hasExtraReserve) {
+    nextSets.forEach((set) => {
+      set.reps = Math.min(setting.repMax, set.reps + 1);
+      set.rir = setting.targetRir;
+    });
+  } else {
+    const targetIndex = [...nextSets].map((set) => set.reps).lastIndexOf(Math.min(...nextSets.map((set) => set.reps)));
+    nextSets[targetIndex].reps = Math.min(setting.repMax, nextSets[targetIndex].reps + 1);
+    nextSets[targetIndex].rir = setting.targetRir;
+  }
+
+  return {
+    type: "reps",
+    label: hasExtraReserve ? "각 세트 반복 +1" : "총 반복수 +1",
+    reason: hasExtraReserve
+      ? `모든 세트에 목표보다 1회 이상 여유가 있어 각 세트 반복수를 올렸어요.`
+      : `과도한 증가를 피하기 위해 전체 세트에서 반복수 1회만 추가했어요.`,
+    sets: nextSets,
+    setting,
+  };
+}
+
+function getWarmupSets(workWeight, exerciseName) {
+  if (!getCoreLiftKey(exerciseName) || workWeight <= 0) return [];
+  const increment = getExerciseIncrement(exerciseName);
+  const ratios = workWeight >= 100 ? [0.4, 0.6, 0.8] : [0.5, 0.7];
+  const reps = ratios.length === 3 ? [5, 3, 1] : [5, 2];
+
+  return ratios.map((ratio, index) => ({
+    weight: roundToIncrement(workWeight * ratio, increment),
+    reps: reps[index],
+  }));
+}
+
 export default function App() {
   const [authSession, setAuthSession] = useState(() => loadStoredSession());
   const [authChecking, setAuthChecking] = useState(() => Boolean(authSession));
@@ -185,11 +442,12 @@ export default function App() {
   const [authLoading, setAuthLoading] = useState(false);
   const [setupScreen, setSetupScreen] = useState("setup");
   const [activeTab, setActiveTab] = useState("record");
+  const [recordView, setRecordView] = useState("diet");
   const [selectedDate, setSelectedDate] = useState(() => new Date());
-  const dateSwipeStartRef = useRef(null);
-  const [dateSwipeOffset, setDateSwipeOffset] = useState(0);
-  const [dateSwipeDragging, setDateSwipeDragging] = useState(false);
-  const [dateSwipeSettling, setDateSwipeSettling] = useState(false);
+  const recordSwipeStartRef = useRef(null);
+  const [recordSwipeOffset, setRecordSwipeOffset] = useState(0);
+  const [recordSwipeDragging, setRecordSwipeDragging] = useState(false);
+  const [recordSwipeSettling, setRecordSwipeSettling] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [calendarOpen, setCalendarOpen] = useState(false);
   const [dayComplete, setDayComplete] = useState(false);
@@ -390,6 +648,7 @@ export default function App() {
 
   const selectedDateKey = getDateKey(selectedDate);
   const meals = mealsByDate[selectedDateKey] || [];
+  const workoutEntries = dailyRecords[selectedDateKey]?.workoutEntries || [];
   const setMeals = (updater) => {
     setMealsByDate((current) => {
       const currentMeals = current[selectedDateKey] || [];
@@ -400,6 +659,31 @@ export default function App() {
         [selectedDateKey]: nextMeals,
       };
     });
+  };
+
+  const saveWorkoutEntries = (entries) => {
+    setDailyRecords((current) => ({
+      ...current,
+      [selectedDateKey]: {
+        ...current[selectedDateKey],
+        workoutEntries: entries,
+        workoutUpdatedAt: new Date().toISOString(),
+      },
+    }));
+  };
+
+  const updateExerciseSetting = (exerciseName, field, value) => {
+    const exerciseKey = normalizeExerciseName(exerciseName);
+    setProfile((current) => ({
+      ...current,
+      exerciseSettings: {
+        ...(current.exerciseSettings || {}),
+        [exerciseKey]: {
+          ...(current.exerciseSettings?.[exerciseKey] || {}),
+          [field]: value,
+        },
+      },
+    }));
   };
 
   useEffect(() => {
@@ -507,19 +791,6 @@ export default function App() {
     setSetupScreen("setup");
   };
 
-  const moveSelectedDate = (amount) => {
-    setSelectedDate((current) => {
-      const nextDate = addDays(current, amount);
-      const nextRecord = dailyRecords[getDateKey(nextDate)] || {};
-      setMorningWeight(nextRecord.morningWeight ? String(nextRecord.morningWeight) : "");
-      setMorningWeightInput("");
-      setDayComplete(Boolean(nextRecord.dayComplete));
-      return nextDate;
-    });
-    setIsAddingMeal(false);
-    setEditingMealId(null);
-  };
-
   const selectCalendarDate = (date) => {
     const nextRecord = dailyRecords[getDateKey(date)] || {};
     setSelectedDate(date);
@@ -530,41 +801,41 @@ export default function App() {
     setEditingMealId(null);
   };
 
-  const isDateSwipeIgnoredTarget = (target) => {
+  const isRecordSwipeIgnoredTarget = (target) => {
     return Boolean(target?.closest?.(
-      "input, textarea, select, button, a, .modal-backdrop, .sheet-backdrop, .bottom-nav, .app-footer-actions, .weight-line-chart, .my-foods-screen"
+      "input, textarea, select, button, a, .modal-backdrop, .sheet-backdrop, .bottom-nav, .app-footer-actions, .weight-line-chart, .my-foods-screen, .workout-exercise-card"
     ));
   };
 
-  const resetDateSwipe = () => {
-    dateSwipeStartRef.current = null;
-    setDateSwipeOffset(0);
-    setDateSwipeDragging(false);
-    setDateSwipeSettling(false);
+  const resetRecordSwipe = () => {
+    recordSwipeStartRef.current = null;
+    setRecordSwipeOffset(0);
+    setRecordSwipeDragging(false);
+    setRecordSwipeSettling(false);
   };
 
-  const handleDateSwipePointerDown = (event) => {
+  const handleRecordSwipePointerDown = (event) => {
     if (event.pointerType === "mouse" && event.button !== 0) return;
-    if (activeTab === "foods" || calendarOpen || settingsOpen || matchChoiceTarget || actionTarget) {
-      dateSwipeStartRef.current = null;
+    if (activeTab !== "record" || calendarOpen || settingsOpen || matchChoiceTarget || actionTarget) {
+      recordSwipeStartRef.current = null;
       return;
     }
 
-    if (isDateSwipeIgnoredTarget(event.target)) {
-      dateSwipeStartRef.current = null;
+    if (isRecordSwipeIgnoredTarget(event.target)) {
+      recordSwipeStartRef.current = null;
       return;
     }
 
-    dateSwipeStartRef.current = {
+    recordSwipeStartRef.current = {
       x: event.clientX,
       y: event.clientY,
       isHorizontal: false,
     };
-    setDateSwipeSettling(false);
+    setRecordSwipeSettling(false);
   };
 
-  const handleDateSwipePointerMove = (event) => {
-    const start = dateSwipeStartRef.current;
+  const handleRecordSwipePointerMove = (event) => {
+    const start = recordSwipeStartRef.current;
     if (!start) return;
 
     const dx = event.clientX - start.x;
@@ -574,56 +845,57 @@ export default function App() {
 
     if (!start.isHorizontal) {
       if (absY > 12 && absY > absX) {
-        resetDateSwipe();
+        resetRecordSwipe();
         return;
       }
 
       if (absX < 8) return;
       start.isHorizontal = true;
-      setDateSwipeDragging(true);
+      setRecordSwipeDragging(true);
     }
 
     const limitedOffset = Math.max(-96, Math.min(96, dx * 0.45));
-    setDateSwipeOffset(limitedOffset);
+    setRecordSwipeOffset(limitedOffset);
   };
 
-  const handleDateSwipePointerEnd = (event) => {
-    const start = dateSwipeStartRef.current;
-    dateSwipeStartRef.current = null;
+  const handleRecordSwipePointerEnd = (event) => {
+    const start = recordSwipeStartRef.current;
+    recordSwipeStartRef.current = null;
     if (!start) return;
 
     const dx = event.clientX - start.x;
     const dy = event.clientY - start.y;
     const shouldMove = start.isHorizontal && Math.abs(dx) >= 64 && Math.abs(dx) > Math.abs(dy) * 1.2;
+    const nextView = dx < 0 ? "workout" : "diet";
+    const canMove = shouldMove && nextView !== recordView;
 
-    setDateSwipeSettling(true);
+    setRecordSwipeSettling(true);
 
-    if (shouldMove) {
-      const direction = dx < 0 ? 1 : -1;
-      setDateSwipeOffset(dx < 0 ? -116 : 116);
+    if (canMove) {
+      setRecordSwipeOffset(dx < 0 ? -116 : 116);
       window.setTimeout(() => {
-        moveSelectedDate(direction);
-        setDateSwipeOffset(0);
-        setDateSwipeDragging(false);
-        window.setTimeout(() => setDateSwipeSettling(false), 180);
+        setRecordView(nextView);
+        setRecordSwipeOffset(0);
+        setRecordSwipeDragging(false);
+        window.setTimeout(() => setRecordSwipeSettling(false), 180);
       }, 100);
       return;
     }
 
-    setDateSwipeOffset(0);
-    setDateSwipeDragging(false);
-    window.setTimeout(() => setDateSwipeSettling(false), 180);
+    setRecordSwipeOffset(0);
+    setRecordSwipeDragging(false);
+    window.setTimeout(() => setRecordSwipeSettling(false), 180);
   };
 
-  const dateSwipeClassName = [
+  const recordSwipeClassName = [
     "app-shell",
-    activeTab !== "foods" ? "can-date-swipe" : "",
-    dateSwipeDragging ? "is-date-swiping" : "",
-    dateSwipeSettling ? "is-date-settling" : "",
+    activeTab === "record" ? "can-record-swipe" : "",
+    recordSwipeDragging ? "is-record-swiping" : "",
+    recordSwipeSettling ? "is-record-settling" : "",
   ].filter(Boolean).join(" ");
 
-  const dateSwipeStyle = activeTab !== "foods"
-    ? { "--date-swipe-offset": dateSwipeOffset + "px" }
+  const recordSwipeStyle = activeTab === "record"
+    ? { "--record-swipe-offset": recordSwipeOffset + "px" }
     : undefined;
 
   const registerMorningWeight = () => {
@@ -2043,14 +2315,14 @@ export default function App() {
 
   return (
     <main
-      className={dateSwipeClassName}
-      style={dateSwipeStyle}
-      onPointerDown={handleDateSwipePointerDown}
-      onPointerMove={handleDateSwipePointerMove}
-      onPointerUp={handleDateSwipePointerEnd}
-      onPointerCancel={resetDateSwipe}
+      className={recordSwipeClassName}
+      style={recordSwipeStyle}
+      onPointerDown={handleRecordSwipePointerDown}
+      onPointerMove={handleRecordSwipePointerMove}
+      onPointerUp={handleRecordSwipePointerEnd}
+      onPointerCancel={resetRecordSwipe}
     >
-      {activeTab !== "foods" && (
+      {activeTab !== "foods" && (activeTab !== "record" || recordView === "diet") && (
         <section className="top-panel" aria-label="오늘 식단 요약">
         <div className="date-row date-nav-row compact-date-row">
           <button className="calendar-open-button" type="button" onClick={() => setCalendarOpen(true)} aria-label="달력 열기">
@@ -2064,6 +2336,9 @@ export default function App() {
           </div>
         </div>
         {!isViewingToday && <p className="date-helper-text">선택한 날짜의 기록을 확인 중이야.</p>}
+        {activeTab === "record" && (
+          <RecordViewSwitch value={recordView} onChange={setRecordView} />
+        )}
         {foodDbLoading && <p className="date-helper-text">음식 DB 불러오는 중...</p>}
         {foodDbError && <p className="form-error">{foodDbError}</p>}
 
@@ -2091,7 +2366,25 @@ export default function App() {
         </section>
       )}
 
-      {activeTab === "record" && (
+      {activeTab === "record" && recordView === "workout" && (
+        <section className="workout-top-panel" aria-label="오늘 운동 기록">
+          <div className="date-row date-nav-row compact-date-row">
+            <button className="calendar-open-button" type="button" onClick={() => setCalendarOpen(true)} aria-label="달력 열기">
+              📅
+            </button>
+            <p className="date-label">{today}</p>
+            <div className="top-actions">
+              <button className="icon-button" type="button" onClick={() => setSettingsOpen(true)} aria-label="설정 열기">
+                ⚙
+              </button>
+            </div>
+          </div>
+          {!isViewingToday && <p className="date-helper-text">선택한 날짜의 운동 기록을 확인 중이야.</p>}
+          <RecordViewSwitch value={recordView} onChange={setRecordView} />
+        </section>
+      )}
+
+      {activeTab === "record" && recordView === "diet" && (
         <>
       <MorningWeightCard
         value={morningWeight}
@@ -2236,6 +2529,17 @@ export default function App() {
         </>
       )}
 
+      {activeTab === "record" && recordView === "workout" && (
+        <WorkoutScreen
+          selectedDateKey={selectedDateKey}
+          savedEntries={workoutEntries}
+          dailyRecords={dailyRecords}
+          profile={profile}
+          onSave={saveWorkoutEntries}
+          onExerciseSettingChange={updateExerciseSetting}
+        />
+      )}
+
       {activeTab === "stats" && (
         <StatsScreen stats={stats} plan={activePlan} totals={totals} />
       )}
@@ -2255,7 +2559,7 @@ export default function App() {
       )}
 
       <div className="app-footer-actions">
-        {activeTab === "record" && (
+        {activeTab === "record" && recordView === "diet" && (
           <button
             className={dayComplete ? "finish-day-button is-complete" : "finish-day-button"}
             type="button"
@@ -2734,6 +3038,228 @@ function MorningWeightCard({ value, inputValue, onInputChange, onRegister, onLon
   );
 }
 
+function RecordViewSwitch({ value, onChange }) {
+  return (
+    <div className="record-view-switch" role="group" aria-label="기록 종류">
+      <button type="button" className={value === "diet" ? "is-active" : ""} onClick={() => onChange("diet")}>식단</button>
+      <button type="button" className={value === "workout" ? "is-active" : ""} onClick={() => onChange("workout")}>운동</button>
+    </div>
+  );
+}
+
+function WorkoutScreen({
+  selectedDateKey,
+  savedEntries,
+  dailyRecords,
+  profile,
+  onSave,
+  onExerciseSettingChange,
+}) {
+  const [memo, setMemo] = useState(() => formatWorkoutMemo(savedEntries));
+  const [statusMessage, setStatusMessage] = useState("");
+
+  useEffect(() => {
+    setMemo(formatWorkoutMemo(savedEntries));
+    setStatusMessage("");
+    // 날짜가 바뀌면 해당 날짜의 저장 기록으로 입력창을 교체한다.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedDateKey]);
+
+  const draftExercises = useMemo(() => parseWorkoutMemo(memo), [memo]);
+
+  const applyRecommendation = (exercise, recommendation) => {
+    if (!recommendation) return;
+    const exerciseKey = normalizeExerciseName(exercise.name);
+    const nextExercises = draftExercises.map((entry) =>
+      normalizeExerciseName(entry.name) === exerciseKey
+        ? { ...entry, sets: recommendation.sets.map((set) => ({ ...set })) }
+        : entry
+    );
+    setMemo(formatWorkoutMemo(nextExercises));
+    setStatusMessage(`${exercise.name}: ${recommendation.label} 추천을 입력했어요.`);
+  };
+
+  const saveWorkout = (event) => {
+    event.preventDefault();
+    const validEntries = draftExercises
+      .filter((exercise) => exercise.name && exercise.sets.length > 0)
+      .map((exercise) => ({
+        ...exercise,
+        id: `${selectedDateKey}-${normalizeExerciseName(exercise.name)}`,
+        sets: exercise.sets.map((set, index) => ({ ...set, setIndex: index + 1, type: "working" })),
+      }));
+
+    if (memo.trim() && validEntries.length === 0) {
+      setStatusMessage("운동명 아래에 ‘중량 반복수 @RIR’ 형식으로 한 세트 이상 입력해줘.");
+      return;
+    }
+
+    onSave(validEntries);
+    setMemo(formatWorkoutMemo(validEntries));
+    setStatusMessage(validEntries.length > 0 ? "운동 기록을 저장했어요." : "운동 기록을 비웠어요.");
+  };
+
+  return (
+    <section className="workout-screen" aria-label="운동 기록">
+      <section className="workout-memo-card">
+        <div className="section-title">
+          <div>
+            <strong>운동 메모</strong>
+            <small>운동과 세트 수는 직접 결정해요.</small>
+          </div>
+          <span className="workout-swipe-hint">← 식단 · 운동 →</span>
+        </div>
+
+        <form onSubmit={saveWorkout}>
+          <textarea
+            className="workout-memo-input"
+            value={memo}
+            onChange={(event) => {
+              setMemo(event.target.value);
+              setStatusMessage("");
+            }}
+            rows={Math.max(10, memo.split(/\r?\n/).length + 2)}
+            placeholder={`벤치프레스\n100 5 @2\n100 5 @2\n100 5 @1\n\n인클라인 덤벨프레스\n35 10 @2\n35 9 @1\n35 8 @1`}
+            lang="ko-KR"
+            autoCapitalize="off"
+            autoCorrect="off"
+            spellCheck={false}
+          />
+
+          <div className="workout-format-guide">
+            <strong>입력 형식</strong>
+            <span>중량 반복수 @RIR</span>
+            <small>RIR을 모르면 ‘100 5’처럼 생략해도 돼요.</small>
+          </div>
+
+          {statusMessage && <p className={statusMessage.includes("입력해줘") ? "form-error" : "workout-status"}>{statusMessage}</p>}
+
+          <div className="daily-memo-actions">
+            <button
+              type="button"
+              className="ghost-button"
+              disabled={!memo.trim()}
+              onClick={() => {
+                if (window.confirm("현재 운동 메모를 비울까요?")) {
+                  setMemo("");
+                  setStatusMessage("");
+                }
+              }}
+            >
+              비우기
+            </button>
+            <button type="submit" className="primary-button">운동 기록 저장</button>
+          </div>
+        </form>
+      </section>
+
+      {draftExercises.length > 0 && (
+        <section className="workout-analysis-list" aria-label="운동 추천 분석">
+          {draftExercises.map((exercise, index) => {
+            const previous = findPreviousExercise(dailyRecords, selectedDateKey, exercise.name);
+            const recommendation = buildExerciseRecommendation(previous, profile);
+            const setting = getExerciseSetting(profile, exercise.name);
+            const currentE1RM = calculateExerciseE1RM(exercise);
+            const previousE1RM = calculateExerciseE1RM(previous);
+            const profile1RM = getProfile1RM(profile, exercise.name);
+            const estimatedRir = exercise.sets[0]?.rir === null || exercise.sets[0]?.rir === undefined
+              ? estimateSetRIR(exercise.sets[0], profile1RM || previousE1RM)
+              : null;
+            const firstGuide = previous ? null : getFirstLoadGuide(profile, exercise.name);
+            const workWeight = exercise.sets[0]?.weight || recommendation?.sets[0]?.weight || firstGuide?.weight || 0;
+            const warmups = getWarmupSets(workWeight, exercise.name);
+
+            return (
+              <article className="workout-exercise-card" key={`${normalizeExerciseName(exercise.name)}-${index}`}>
+                <div className="workout-exercise-head">
+                  <div>
+                    <strong>{exercise.name}</strong>
+                    <span>{setting.label} · 목표 RIR {setting.targetRir}</span>
+                  </div>
+                  <div className="exercise-mode-toggle" role="group" aria-label={`${exercise.name} 과부하 방식`}>
+                    <button
+                      type="button"
+                      className={setting.progressionMode === "reps" ? "is-active" : ""}
+                      onClick={() => onExerciseSettingChange(exercise.name, "progressionMode", "reps")}
+                    >
+                      반복
+                    </button>
+                    <button
+                      type="button"
+                      className={setting.progressionMode === "load" ? "is-active" : ""}
+                      onClick={() => onExerciseSettingChange(exercise.name, "progressionMode", "load")}
+                    >
+                      중량
+                    </button>
+                  </div>
+                </div>
+
+                {previous ? (
+                  <div className="previous-workout-box">
+                    <div>
+                      <span>이전 기록</span>
+                      <small>{previous.dateKey}</small>
+                    </div>
+                    <strong>{previous.sets.map((set) => `${formatWorkoutNumber(set.weight)}×${set.reps}`).join(" · ")}</strong>
+                  </div>
+                ) : (
+                  <div className="previous-workout-box is-empty">
+                    <span>이전 기록 없음</span>
+                    <small>첫 기록을 저장하면 다음 운동부터 추천해요.</small>
+                  </div>
+                )}
+
+                {recommendation && (
+                  <div className={`recommendation-box is-${recommendation.type}`}>
+                    <div className="recommendation-copy">
+                      <span>다음 추천</span>
+                      <strong>{recommendation.sets.map((set) => `${formatWorkoutNumber(set.weight)}×${set.reps}`).join(" · ")}</strong>
+                      <small>{recommendation.reason}</small>
+                    </div>
+                    <button type="button" onClick={() => applyRecommendation(exercise, recommendation)}>추천 입력</button>
+                  </div>
+                )}
+
+                {firstGuide && (
+                  <div className="first-load-guide">
+                    <span>{firstGuide.label}</span>
+                    <strong>{formatWorkoutNumber(firstGuide.weight)}kg · {firstGuide.reps}회부터</strong>
+                    <small>세트 수는 직접 입력하고, 첫 기록 이후부터 점진적 과부하를 추천해요.</small>
+                  </div>
+                )}
+
+                {(currentE1RM > 0 || previousE1RM > 0) && (
+                  <div className="e1rm-row">
+                    <span>e1RM</span>
+                    <strong>{formatWorkoutNumber(currentE1RM || previousE1RM)}kg</strong>
+                    <small>{currentE1RM > 0 ? `현재 입력 기준 · ${exercise.sets.some((set) => set.rir !== null && set.rir !== undefined) ? "RIR 반영" : "신뢰도 낮음"}` : "이전 기록 기준"}</small>
+                  </div>
+                )}
+
+                {estimatedRir !== null && (
+                  <div className="estimated-rir-row">
+                    <span>첫 세트 추정 RIR</span>
+                    <strong>{estimatedRir}</strong>
+                    <small>입력한 1RM 기준의 참고값이에요.</small>
+                  </div>
+                )}
+
+                {warmups.length > 0 && (
+                  <div className="warmup-box">
+                    <span>워밍업 가이드</span>
+                    <strong>{warmups.map((set) => `${formatWorkoutNumber(set.weight)}×${set.reps}`).join(" → ")}</strong>
+                    <small>작업세트에 포함되지 않아요.</small>
+                  </div>
+                )}
+              </article>
+            );
+          })}
+        </section>
+      )}
+    </section>
+  );
+}
+
 function CalendarSheet({ selectedDate, onSelect, onClose, dailyRecords }) {
   const [viewDate, setViewDate] = useState(() => new Date(selectedDate.getFullYear(), selectedDate.getMonth(), 1));
   const year = viewDate.getFullYear();
@@ -2763,6 +3289,7 @@ function CalendarSheet({ selectedDate, onSelect, onClose, dailyRecords }) {
             const isToday = isSameDate(date, new Date());
             const hasFood = Boolean(record.dayComplete || record.kcal);
             const hasWeight = toNumber(record.morningWeight) > 0;
+            const hasWorkout = Array.isArray(record.workoutEntries) && record.workoutEntries.length > 0;
 
             return (
               <button
@@ -2775,6 +3302,7 @@ function CalendarSheet({ selectedDate, onSelect, onClose, dailyRecords }) {
                 <span>
                   {hasFood && <i className="food-dot" />}
                   {hasWeight && <i className="weight-dot" />}
+                  {hasWorkout && <i className="workout-dot" />}
                 </span>
               </button>
             );
@@ -2947,6 +3475,60 @@ function SetupScreen({ profile, onProfileChange, onSubmit }) {
             max="14"
             onChange={(value) => onProfileChange("weightSessions", value)}
           />
+        </section>
+
+        <section className="daily-calc-section training-setup-section">
+          <div className="section-title">
+            <strong>운동 설정 <em>(선택)</em></strong>
+            <small>추천 기본값</small>
+          </div>
+          <p className="section-helper">운동은 사용자가 고르고, 앱은 선택한 방식으로 중량과 반복수만 추천해요.</p>
+
+          <div className="training-setting-block">
+            <strong>훈련 목표</strong>
+            <div className="training-choice-grid" role="group" aria-label="훈련 목표">
+              {Object.entries(TRAINING_GOALS).map(([value, option]) => (
+                <button
+                  key={value}
+                  type="button"
+                  className={(profile.trainingGoal || "hypertrophy") === value ? "is-selected" : ""}
+                  onClick={() => onProfileChange("trainingGoal", value)}
+                >
+                  {option.label}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div className="training-setting-block">
+            <strong>점진적 과부하 방식</strong>
+            <div className="training-choice-grid training-progression-grid" role="group" aria-label="점진적 과부하 방식">
+              <button
+                type="button"
+                className={(profile.progressionMode || "reps") === "reps" ? "is-selected" : ""}
+                onClick={() => onProfileChange("progressionMode", "reps")}
+              >
+                반복수 증가
+              </button>
+              <button
+                type="button"
+                className={profile.progressionMode === "load" ? "is-selected" : ""}
+                onClick={() => onProfileChange("progressionMode", "load")}
+              >
+                중량 증가
+              </button>
+            </div>
+          </div>
+
+          <div className="big-lift-inputs">
+            <strong>4대 운동 1RM <em>(모르면 비워두기)</em></strong>
+            <div className="big-lift-grid">
+              <SetupInlineNumberField label="스쿼트" unit="kg" value={profile.squat1RM} min="0" max="500" step="0.5" onChange={(value) => onProfileChange("squat1RM", value)} />
+              <SetupInlineNumberField label="벤치프레스" unit="kg" value={profile.bench1RM} min="0" max="400" step="0.5" onChange={(value) => onProfileChange("bench1RM", value)} />
+              <SetupInlineNumberField label="데드리프트" unit="kg" value={profile.deadlift1RM} min="0" max="600" step="0.5" onChange={(value) => onProfileChange("deadlift1RM", value)} />
+              <SetupInlineNumberField label="OHP" unit="kg" value={profile.ohp1RM} min="0" max="300" step="0.5" onChange={(value) => onProfileChange("ohp1RM", value)} />
+            </div>
+          </div>
         </section>
 
         <section className="daily-calc-section">
@@ -3404,7 +3986,7 @@ function PlanResultScreen({ plan, onPlanChange, onBack, onStart }) {
 
       <div className="result-actions">
         <button className="ghost-button" type="button" onClick={onBack}>다시 입력</button>
-        <button className="primary-button" type="button" onClick={onStart}>식단 메모 시작</button>
+        <button className="primary-button" type="button" onClick={onStart}>식단·운동 기록 시작</button>
       </div>
     </main>
   );
