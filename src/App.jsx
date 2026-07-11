@@ -181,6 +181,42 @@ const TRAINING_GOALS = {
   endurance: { label: "근지구력", repMin: 15, repMax: 30, targetRir: 2, firstLoadRatio: 0.55 },
 };
 
+const EQUIPMENT_OPTIONS = {
+  barbell: "바벨",
+  dumbbell: "덤벨",
+  machine: "머신",
+  cable: "케이블",
+  bodyweight: "맨몸",
+  other: "기타",
+};
+
+const MUSCLE_GROUP_LABELS = {
+  chest: "가슴",
+  back: "등",
+  shoulders: "어깨",
+  biceps: "이두",
+  triceps: "삼두",
+  quads: "대퇴사두",
+  hamstrings: "햄스트링",
+  glutes: "둔근",
+  calves: "종아리",
+};
+
+const EXERCISE_MUSCLE_RULES = [
+  { keys: ["벤치프레스", "체스트프레스", "덤벨프레스", "플라이", "펙덱"], direct: ["chest"], indirect: ["triceps", "shoulders"] },
+  { keys: ["오버헤드프레스", "밀리터리프레스", "숄더프레스", "ohp"], direct: ["shoulders"], indirect: ["triceps"] },
+  { keys: ["레터럴레이즈", "사이드레터럴", "리어델트", "벤트오버레이즈"], direct: ["shoulders"], indirect: [] },
+  { keys: ["랫풀다운", "풀업", "친업", "바벨로우", "덤벨로우", "시티드로우", "케이블로우", "티바로우"], direct: ["back"], indirect: ["biceps"] },
+  { keys: ["풀오버"], direct: ["back"], indirect: ["chest"] },
+  { keys: ["바벨컬", "덤벨컬", "해머컬", "프리처컬", "암컬"], direct: ["biceps"], indirect: [] },
+  { keys: ["푸시다운", "트라이셉스", "삼두", "스컬크러셔", "라잉익스텐션"], direct: ["triceps"], indirect: [] },
+  { keys: ["스쿼트", "레그프레스", "핵스쿼트", "레그익스텐션", "런지"], direct: ["quads", "glutes"], indirect: ["hamstrings"] },
+  { keys: ["루마니안데드리프트", "rdl", "레그컬", "스티프데드리프트"], direct: ["hamstrings", "glutes"], indirect: ["back"] },
+  { keys: ["데드리프트"], direct: ["hamstrings", "glutes", "back"], indirect: ["quads"] },
+  { keys: ["힙쓰러스트", "글루트브리지", "힙어브덕션"], direct: ["glutes"], indirect: ["hamstrings"] },
+  { keys: ["카프레이즈", "종아리"], direct: ["calves"], indirect: [] },
+];
+
 function normalizeExerciseName(value) {
   return String(value || "")
     .trim()
@@ -269,7 +305,7 @@ function formatWorkoutMemo(exercises) {
     .join("\n\n");
 }
 
-function findPreviousExercise(dailyRecords, selectedDateKey, exerciseName) {
+function findPreviousExercise(dailyRecords, selectedDateKey, exerciseName, equipment = "") {
   const targetName = normalizeExerciseName(exerciseName);
   const earlierDateKeys = Object.keys(dailyRecords || {})
     .filter((dateKey) => dateKey < selectedDateKey)
@@ -278,12 +314,80 @@ function findPreviousExercise(dailyRecords, selectedDateKey, exerciseName) {
   for (const dateKey of earlierDateKeys) {
     const entries = dailyRecords[dateKey]?.workoutEntries;
     const match = Array.isArray(entries)
-      ? entries.find((entry) => normalizeExerciseName(entry.name) === targetName && entry.sets?.length > 0)
+      ? entries.find((entry) => {
+          const sameName = normalizeExerciseName(entry.name) === targetName;
+          const sameEquipment = !equipment || !entry.equipment || entry.equipment === equipment;
+          return sameName && sameEquipment && entry.sets?.length > 0;
+        })
       : null;
-    if (match) return { ...match, dateKey };
+    if (match) return { ...match, dateKey, sessionMeta: dailyRecords[dateKey]?.workoutSession || {} };
   }
 
   return null;
+}
+
+function getExerciseHistory(dailyRecords, selectedDateKey, exerciseName, equipment = "", includeSelectedDate = false) {
+  const targetName = normalizeExerciseName(exerciseName);
+  return Object.keys(dailyRecords || {})
+    .filter((dateKey) => includeSelectedDate ? dateKey <= selectedDateKey : dateKey < selectedDateKey)
+    .sort((a, b) => b.localeCompare(a))
+    .flatMap((dateKey) => {
+      const entries = dailyRecords[dateKey]?.workoutEntries;
+      if (!Array.isArray(entries)) return [];
+      const match = entries.find((entry) => {
+        const sameName = normalizeExerciseName(entry.name) === targetName;
+        const sameEquipment = !equipment || !entry.equipment || entry.equipment === equipment;
+        return sameName && sameEquipment && entry.sets?.length > 0;
+      });
+      return match ? [{ ...match, dateKey, sessionMeta: dailyRecords[dateKey]?.workoutSession || {} }] : [];
+    });
+}
+
+function getExerciseMuscleMap(exerciseName) {
+  const normalizedName = normalizeExerciseName(exerciseName);
+  const rule = EXERCISE_MUSCLE_RULES.find((item) => item.keys.some((key) => normalizedName.includes(normalizeExerciseName(key))));
+  return rule || { direct: [], indirect: [] };
+}
+
+function getSetStimulusWeight(set) {
+  if (set?.rir === null || set?.rir === undefined) return 1;
+  if (set.rir <= 3) return 1;
+  if (set.rir === 4) return 0.5;
+  return 0;
+}
+
+function calculateWeeklyVolume(dailyRecords, selectedDateKey, currentEntries = []) {
+  const selectedDate = new Date(`${selectedDateKey}T12:00:00`);
+  const volume = Object.keys(MUSCLE_GROUP_LABELS).reduce((acc, key) => ({ ...acc, [key]: { direct: 0, indirect: 0 } }), {});
+  let mappedSets = 0;
+  let totalSets = 0;
+
+  const entriesByDate = Object.keys(dailyRecords || {})
+    .filter((dateKey) => {
+      const targetDate = new Date(`${dateKey}T12:00:00`);
+      const difference = Math.round((selectedDate - targetDate) / 86400000);
+      return difference >= 0 && difference <= 6;
+    })
+    .reduce((acc, dateKey) => ({ ...acc, [dateKey]: dailyRecords[dateKey]?.workoutEntries || [] }), {});
+
+  if (currentEntries.some((entry) => entry.sets?.length > 0)) entriesByDate[selectedDateKey] = currentEntries;
+
+  Object.values(entriesByDate).flat().forEach((exercise) => {
+    const muscles = getExerciseMuscleMap(exercise.name);
+    const stimulusSets = (exercise.sets || []).reduce((sum, set) => sum + getSetStimulusWeight(set), 0);
+    totalSets += (exercise.sets || []).length;
+    if (muscles.direct.length || muscles.indirect.length) mappedSets += (exercise.sets || []).length;
+    muscles.direct.forEach((muscle) => { volume[muscle].direct += stimulusSets; });
+    muscles.indirect.forEach((muscle) => { volume[muscle].indirect += stimulusSets * 0.5; });
+  });
+
+  return {
+    rows: Object.entries(volume)
+      .map(([key, value]) => ({ key, label: MUSCLE_GROUP_LABELS[key], ...value, total: value.direct + value.indirect }))
+      .filter((row) => row.total > 0)
+      .sort((a, b) => b.total - a.total),
+    mappingConfidence: totalSets > 0 ? mappedSets / totalSets : 0,
+  };
 }
 
 function getExerciseSetting(profile, exerciseName) {
@@ -294,6 +398,7 @@ function getExerciseSetting(profile, exerciseName) {
   return {
     trainingGoal,
     progressionMode: savedSetting.progressionMode || profile.progressionMode || "reps",
+    equipment: savedSetting.equipment || "",
     ...(TRAINING_GOALS[trainingGoal] || TRAINING_GOALS.hypertrophy),
   };
 }
@@ -315,6 +420,136 @@ function estimateSetRIR(set, reference1RM) {
   return Math.max(0, Math.min(5, Math.round(estimatedMaxReps - set.reps)));
 }
 
+function getRollingE1RM(history, currentExercise = null) {
+  const candidates = [
+    ...(currentExercise?.sets?.length ? [{ ...currentExercise, dateKey: "current" }] : []),
+    ...(history || []),
+  ]
+    .map((entry) => ({ dateKey: entry.dateKey, value: calculateExerciseE1RM(entry) }))
+    .filter((entry) => entry.value > 0)
+    .slice(0, 3);
+
+  if (candidates.length === 0) return { value: 0, trendPercent: 0, samples: 0 };
+  const weights = candidates.length === 1 ? [1] : candidates.length === 2 ? [0.65, 0.35] : [0.5, 0.3, 0.2];
+  const value = candidates.reduce((sum, entry, index) => sum + entry.value * weights[index], 0) / weights.slice(0, candidates.length).reduce((a, b) => a + b, 0);
+  const oldest = candidates[candidates.length - 1]?.value || value;
+  return {
+    value,
+    trendPercent: oldest > 0 ? ((candidates[0].value - oldest) / oldest) * 100 : 0,
+    samples: candidates.length,
+  };
+}
+
+function getRirReliability(history, currentExercise = null) {
+  const sets = [
+    ...(currentExercise?.sets || []),
+    ...(history || []).slice(0, 3).flatMap((entry) => entry.sets || []),
+  ];
+  if (sets.length === 0) return { level: "low", label: "낮음", coverage: 0 };
+  const recorded = sets.filter((set) => set.rir !== null && set.rir !== undefined).length;
+  const coverage = recorded / sets.length;
+  if (sets.length >= 6 && coverage >= 0.8) return { level: "high", label: "높음", coverage };
+  if (sets.length >= 3 && coverage >= 0.4) return { level: "medium", label: "보통", coverage };
+  return { level: "low", label: "낮음", coverage };
+}
+
+function evaluateRecommendationOutcome(entry) {
+  const recommendation = entry?.recommendation;
+  if (!recommendation?.sets?.length || !entry?.sets?.length) return null;
+  const comparedCount = Math.min(recommendation.sets.length, entry.sets.length);
+  const achieved = entry.sets.slice(0, comparedCount).every((actual, index) => {
+    const target = recommendation.sets[index];
+    const targetMet = actual.weight >= target.weight && actual.reps >= target.reps;
+    const effortAcceptable = actual.rir === null || actual.rir === undefined || actual.rir >= Math.max(0, (target.rir ?? 2) - 1);
+    return targetMet && effortAcceptable;
+  });
+  return achieved && entry.sets.length >= recommendation.sets.length ? "success" : "miss";
+}
+
+function getRecommendationAccuracy(dailyRecords) {
+  const entries = Object.values(dailyRecords || {}).flatMap((record) => record?.workoutEntries || []);
+  const evaluated = entries.map(evaluateRecommendationOutcome).filter(Boolean);
+  const successes = evaluated.filter((result) => result === "success").length;
+  return {
+    attempts: evaluated.length,
+    successes,
+    rate: evaluated.length > 0 ? Math.round((successes / evaluated.length) * 100) : 0,
+  };
+}
+
+function getConsecutiveMisses(history) {
+  let misses = 0;
+  for (const entry of history || []) {
+    const outcome = evaluateRecommendationOutcome(entry);
+    if (outcome === "miss") misses += 1;
+    else if (outcome === "success") break;
+    else if (entry.sessionMeta?.readiness === "fatigued") misses += 1;
+    else break;
+  }
+  return misses;
+}
+
+function getRepDropAnalysis(exercise) {
+  const sets = exercise?.sets || [];
+  if (sets.length < 2 || sets[0].reps <= 0) return null;
+  const comparable = sets.filter((set) => Math.abs(set.weight - sets[0].weight) < 0.01);
+  if (comparable.length < 2) return null;
+  const dropPercent = Math.max(0, ((comparable[0].reps - comparable[comparable.length - 1].reps) / comparable[0].reps) * 100);
+  return {
+    dropPercent,
+    level: dropPercent >= 30 ? "high" : dropPercent >= 15 ? "medium" : "normal",
+  };
+}
+
+function getFatigueAnalysis(history, rollingE1RM) {
+  const misses = getConsecutiveMisses(history);
+  const lastSession = history?.[0];
+  const readinessFatigued = lastSession?.sessionMeta?.readiness === "fatigued";
+  const painFlag = Boolean(lastSession?.sessionMeta?.painFlag);
+  const negativeTrend = rollingE1RM.samples >= 3 && rollingE1RM.trendPercent <= -3;
+  const high = painFlag || misses >= 2 || (readinessFatigued && negativeTrend);
+  const medium = !high && (misses === 1 || readinessFatigued || negativeTrend);
+
+  return {
+    level: high ? "high" : medium ? "medium" : "normal",
+    misses,
+    painFlag,
+    negativeTrend,
+    message: painFlag
+      ? "이전 기록에 통증이 표시되어 자동 증량을 보류해요."
+      : high
+        ? "연속 부진과 회복 상태를 보면 회복 조정이 필요할 가능성이 높아요."
+        : medium
+          ? "일시적 피로 가능성이 있어 한 번 더 추세를 확인해요."
+          : "최근 기록에서 뚜렷한 누적 피로 신호는 없어요.",
+  };
+}
+
+function getRecommendationConfidence(history, rirReliability, equipment) {
+  let score = 0;
+  if ((history || []).length >= 3) score += 2;
+  else if ((history || []).length >= 1) score += 1;
+  if (rirReliability.level === "high") score += 2;
+  else if (rirReliability.level === "medium") score += 1;
+  if (equipment) score += 1;
+  const evaluated = (history || []).map(evaluateRecommendationOutcome).filter(Boolean);
+  if (evaluated.some((outcome) => outcome === "success")) score += 1;
+
+  if (score >= 5) return { level: "high", label: "높음", score };
+  if (score >= 3) return { level: "medium", label: "보통", score };
+  return { level: "low", label: "낮음", score };
+}
+
+function getBodyGoalFeedback(profile, fatigueAnalysis) {
+  if (profile.goal === "lose") {
+    return fatigueAnalysis.level === "normal"
+      ? "감량 중에는 같은 수행을 유지하는 것도 좋은 결과예요."
+      : "감량기 회복 저하 가능성을 반영해 증량보다 수행 보존을 우선해요.";
+  }
+  if (profile.goal === "bulk") return "벌크 중이어도 RIR과 수행이 확인될 때만 과부하를 적용해요.";
+  return "유지 단계에서는 최근 수행 추세를 기준으로 보수적으로 진행해요.";
+}
+
 function getProfile1RM(profile, exerciseName) {
   const coreLift = getCoreLiftKey(exerciseName);
   if (!coreLift) return 0;
@@ -334,21 +569,49 @@ function getFirstLoadGuide(profile, exerciseName) {
   };
 }
 
-function buildExerciseRecommendation(previous, profile) {
+function buildExerciseRecommendation(previous, profile, context = {}) {
   if (!previous?.sets?.length) return null;
 
   const setting = getExerciseSetting(profile, previous.name);
   const increment = getExerciseIncrement(previous.name);
   const sets = previous.sets.map((set) => ({ ...set }));
+  const fatigueAnalysis = context.fatigueAnalysis || { level: "normal", painFlag: false };
+  const bodyGoalFeedback = getBodyGoalFeedback(profile, fatigueAnalysis);
   const rirValues = sets.map((set) => set.rir).filter((rir) => rir !== null && rir !== undefined);
   const hasAllRir = rirValues.length === sets.length;
   const tooHard = hasAllRir && rirValues.some((rir) => rir < Math.max(0, setting.targetRir - 1));
 
-  if (tooHard) {
+  if (fatigueAnalysis.painFlag) {
+    return {
+      type: "hold",
+      label: "자동 증량 보류",
+      reason: `${fatigueAnalysis.message} 통증이 가라앉고 동작이 정상일 때 다시 진행해요.`,
+      sets,
+      setting,
+    };
+  }
+
+  if (fatigueAnalysis.level === "high") {
+    return {
+      type: "recovery",
+      label: "회복 조정 -5%",
+      reason: `${fatigueAnalysis.message} ${bodyGoalFeedback}`,
+      sets: sets.map((set) => ({
+        ...set,
+        weight: roundToIncrement(set.weight * 0.95, increment),
+        rir: Math.min(5, setting.targetRir + 1),
+      })),
+      setting,
+    };
+  }
+
+  if (tooHard || fatigueAnalysis.level === "medium") {
     return {
       type: "hold",
       label: "이전 기록 유지",
-      reason: `목표 RIR ${setting.targetRir}보다 여유가 적어 이번에는 중량과 반복수를 유지해요.`,
+      reason: tooHard
+        ? `목표 RIR ${setting.targetRir}보다 여유가 적어 이번에는 중량과 반복수를 유지해요. ${bodyGoalFeedback}`
+        : `${fatigueAnalysis.message} 이번에는 같은 목표를 한 번 더 수행해요. ${bodyGoalFeedback}`,
       sets,
       setting,
     };
@@ -357,7 +620,7 @@ function buildExerciseRecommendation(previous, profile) {
   if (setting.progressionMode === "load") {
     const nextSets = sets.map((set) => {
       const nextWeight = roundToIncrement(set.weight + increment, increment);
-      const setE1RM = calculateSetE1RM(set);
+      const setE1RM = context.rollingE1RM?.value || calculateSetE1RM(set);
       const predictedReps = getCoreLiftKey(previous.name) && setE1RM > 0
         ? Math.floor(30 * (setE1RM / nextWeight - 1) - setting.targetRir)
         : set.reps - 2;
@@ -373,7 +636,7 @@ function buildExerciseRecommendation(previous, profile) {
     return {
       type: "load",
       label: `중량 +${formatWorkoutNumber(increment)}kg`,
-      reason: `중량 증가 방식을 선택해 최소 증량 단위만 올리고 ${setting.label} 반복 범위에 맞췄어요.`,
+      reason: `중량 증가 방식을 선택해 최소 증량 단위만 올리고 ${setting.label} 반복 범위에 맞췄어요. ${bodyGoalFeedback}`,
       sets: nextSets,
       setting,
     };
@@ -384,7 +647,7 @@ function buildExerciseRecommendation(previous, profile) {
     return {
       type: "load",
       label: `중량 +${formatWorkoutNumber(increment)}kg`,
-      reason: `모든 세트가 반복 상한 ${setting.repMax}회에 도달해 중량을 올리고 반복 하한으로 돌아가요.`,
+      reason: `모든 세트가 반복 상한 ${setting.repMax}회에 도달해 중량을 올리고 반복 하한으로 돌아가요. ${bodyGoalFeedback}`,
       sets: sets.map((set) => ({
         ...set,
         weight: roundToIncrement(set.weight + increment, increment),
@@ -413,8 +676,8 @@ function buildExerciseRecommendation(previous, profile) {
     type: "reps",
     label: hasExtraReserve ? "각 세트 반복 +1" : "총 반복수 +1",
     reason: hasExtraReserve
-      ? `모든 세트에 목표보다 1회 이상 여유가 있어 각 세트 반복수를 올렸어요.`
-      : `과도한 증가를 피하기 위해 전체 세트에서 반복수 1회만 추가했어요.`,
+      ? `모든 세트에 목표보다 1회 이상 여유가 있어 각 세트 반복수를 올렸어요. ${bodyGoalFeedback}`
+      : `과도한 증가를 피하기 위해 전체 세트에서 반복수 1회만 추가했어요. ${bodyGoalFeedback}`,
     sets: nextSets,
     setting,
   };
@@ -661,12 +924,16 @@ export default function App() {
     });
   };
 
-  const saveWorkoutEntries = (entries) => {
+  const saveWorkoutEntries = (entries, sessionMeta = {}) => {
     setDailyRecords((current) => ({
       ...current,
       [selectedDateKey]: {
         ...current[selectedDateKey],
         workoutEntries: entries,
+        workoutSession: {
+          ...(current[selectedDateKey]?.workoutSession || {}),
+          ...sessionMeta,
+        },
         workoutUpdatedAt: new Date().toISOString(),
       },
     }));
@@ -3057,15 +3324,42 @@ function WorkoutScreen({
 }) {
   const [memo, setMemo] = useState(() => formatWorkoutMemo(savedEntries));
   const [statusMessage, setStatusMessage] = useState("");
+  const [readiness, setReadiness] = useState(() => dailyRecords[selectedDateKey]?.workoutSession?.readiness || "normal");
+  const [painFlag, setPainFlag] = useState(() => Boolean(dailyRecords[selectedDateKey]?.workoutSession?.painFlag));
+  const [formFailure, setFormFailure] = useState(() => Boolean(dailyRecords[selectedDateKey]?.workoutSession?.formFailure));
+  const [recommendationDrafts, setRecommendationDrafts] = useState(() =>
+    (savedEntries || []).reduce((acc, entry) => entry.recommendation
+      ? { ...acc, [normalizeExerciseName(entry.name)]: entry.recommendation }
+      : acc, {})
+  );
 
   useEffect(() => {
     setMemo(formatWorkoutMemo(savedEntries));
     setStatusMessage("");
+    setReadiness(dailyRecords[selectedDateKey]?.workoutSession?.readiness || "normal");
+    setPainFlag(Boolean(dailyRecords[selectedDateKey]?.workoutSession?.painFlag));
+    setFormFailure(Boolean(dailyRecords[selectedDateKey]?.workoutSession?.formFailure));
+    setRecommendationDrafts((savedEntries || []).reduce((acc, entry) => entry.recommendation
+      ? { ...acc, [normalizeExerciseName(entry.name)]: entry.recommendation }
+      : acc, {}));
     // 날짜가 바뀌면 해당 날짜의 저장 기록으로 입력창을 교체한다.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedDateKey]);
 
   const draftExercises = useMemo(() => parseWorkoutMemo(memo), [memo]);
+  const weeklyVolume = useMemo(
+    () => calculateWeeklyVolume(dailyRecords, selectedDateKey, draftExercises),
+    [dailyRecords, selectedDateKey, draftExercises]
+  );
+  const recommendationAccuracy = useMemo(() => getRecommendationAccuracy(dailyRecords), [dailyRecords]);
+  const fatigueSummaries = draftExercises.map((exercise) => {
+    const setting = getExerciseSetting(profile, exercise.name);
+    const history = getExerciseHistory(dailyRecords, selectedDateKey, exercise.name, setting.equipment);
+    const rolling = getRollingE1RM(history, exercise);
+    return getFatigueAnalysis(history, rolling);
+  });
+  const highFatigueCount = fatigueSummaries.filter((item) => item.level === "high").length;
+  const shouldShowRecoveryAlert = painFlag || highFatigueCount >= 2 || (readiness === "fatigued" && highFatigueCount >= 1);
 
   const applyRecommendation = (exercise, recommendation) => {
     if (!recommendation) return;
@@ -3076,6 +3370,16 @@ function WorkoutScreen({
         : entry
     );
     setMemo(formatWorkoutMemo(nextExercises));
+    setRecommendationDrafts((current) => ({
+      ...current,
+      [exerciseKey]: {
+        type: recommendation.type,
+        label: recommendation.label,
+        sourceDateKey: recommendation.sourceDateKey || "",
+        appliedAt: new Date().toISOString(),
+        sets: recommendation.sets.map((set) => ({ weight: set.weight, reps: set.reps, rir: set.rir })),
+      },
+    }));
     setStatusMessage(`${exercise.name}: ${recommendation.label} 추천을 입력했어요.`);
   };
 
@@ -3086,6 +3390,9 @@ function WorkoutScreen({
       .map((exercise) => ({
         ...exercise,
         id: `${selectedDateKey}-${normalizeExerciseName(exercise.name)}`,
+        equipment: getExerciseSetting(profile, exercise.name).equipment || "",
+        trainingGoal: getExerciseSetting(profile, exercise.name).trainingGoal,
+        recommendation: recommendationDrafts[normalizeExerciseName(exercise.name)] || null,
         sets: exercise.sets.map((set, index) => ({ ...set, setIndex: index + 1, type: "working" })),
       }));
 
@@ -3094,13 +3401,45 @@ function WorkoutScreen({
       return;
     }
 
-    onSave(validEntries);
+    onSave(validEntries, {
+      readiness,
+      painFlag,
+      formFailure,
+      savedAt: new Date().toISOString(),
+    });
     setMemo(formatWorkoutMemo(validEntries));
     setStatusMessage(validEntries.length > 0 ? "운동 기록을 저장했어요." : "운동 기록을 비웠어요.");
   };
 
   return (
     <section className="workout-screen" aria-label="운동 기록">
+      <section className="workout-readiness-card">
+        <div className="workout-readiness-head">
+          <div>
+            <strong>오늘 회복 상태</strong>
+            <small>추천 강도를 조정하는 보조 정보예요.</small>
+          </div>
+          <span className={`readiness-badge is-${readiness}`}>{readiness === "good" ? "좋음" : readiness === "fatigued" ? "피로" : "보통"}</span>
+        </div>
+        <div className="readiness-options" role="group" aria-label="오늘 회복 상태">
+          <button type="button" className={readiness === "good" ? "is-active" : ""} onClick={() => setReadiness("good")}>좋음</button>
+          <button type="button" className={readiness === "normal" ? "is-active" : ""} onClick={() => setReadiness("normal")}>보통</button>
+          <button type="button" className={readiness === "fatigued" ? "is-active" : ""} onClick={() => setReadiness("fatigued")}>피로</button>
+        </div>
+        <div className="workout-condition-flags">
+          <button type="button" className={painFlag ? "is-active is-warning" : ""} onClick={() => setPainFlag((current) => !current)}>통증 {painFlag ? "있음" : "없음"}</button>
+          <button type="button" className={formFailure ? "is-active" : ""} onClick={() => setFormFailure((current) => !current)}>폼 붕괴 {formFailure ? "있음" : "없음"}</button>
+        </div>
+      </section>
+
+      {shouldShowRecoveryAlert && (
+        <section className="workout-recovery-alert">
+          <strong>회복 주간 고려</strong>
+          <span>여러 운동에서 피로 신호가 겹쳤어요. 앱은 세트 수를 바꾸지 않고 중량만 약 5% 낮춰 추천해요.</span>
+          <small>정해진 주기로 강제하지 않으며, 통증이 있으면 자동 증량을 보류해요.</small>
+        </section>
+      )}
+
       <section className="workout-memo-card">
         <div className="section-title">
           <div>
@@ -3153,12 +3492,62 @@ function WorkoutScreen({
         </form>
       </section>
 
+      {(weeklyVolume.rows.length > 0 || recommendationAccuracy.attempts > 0) && (
+        <section className="workout-v2-dashboard">
+          <div className="workout-dashboard-head">
+            <div>
+              <strong>최근 7일 분석</strong>
+              <small>세트 수는 추천하지 않고 현재 패턴만 보여줘요.</small>
+            </div>
+            <div className="recommendation-accuracy">
+              <span>추천 성공률</span>
+              <strong>{recommendationAccuracy.attempts > 0 ? `${recommendationAccuracy.rate}%` : "-"}</strong>
+              <small>{recommendationAccuracy.attempts}회 평가</small>
+            </div>
+          </div>
+
+          {weeklyVolume.rows.length > 0 && (
+            <div className="weekly-volume-list">
+              {weeklyVolume.rows.map((row) => (
+                <div className="weekly-volume-row" key={row.key}>
+                  <span>{row.label}</span>
+                  <div className="weekly-volume-track"><i style={{ width: `${Math.min(100, row.total / 20 * 100)}%` }} /></div>
+                  <strong>{formatWorkoutNumber(row.total)}세트</strong>
+                  <small>직접 {formatWorkoutNumber(row.direct)} · 간접 {formatWorkoutNumber(row.indirect)}</small>
+                </div>
+              ))}
+            </div>
+          )}
+
+          <p className="volume-disclaimer">
+            운동명 기반 추정치 · 매칭 신뢰도 {Math.round(weeklyVolume.mappingConfidence * 100)}%. 간접 세트는 0.5세트로 표시해요.
+          </p>
+        </section>
+      )}
+
       {draftExercises.length > 0 && (
         <section className="workout-analysis-list" aria-label="운동 추천 분석">
           {draftExercises.map((exercise, index) => {
-            const previous = findPreviousExercise(dailyRecords, selectedDateKey, exercise.name);
-            const recommendation = buildExerciseRecommendation(previous, profile);
             const setting = getExerciseSetting(profile, exercise.name);
+            const history = getExerciseHistory(dailyRecords, selectedDateKey, exercise.name, setting.equipment);
+            const previous = history[0] || null;
+            const rollingE1RM = getRollingE1RM(history, exercise);
+            const rirReliability = getRirReliability(history, exercise);
+            const baseFatigueAnalysis = getFatigueAnalysis(history, rollingE1RM);
+            const fatigueAnalysis = painFlag
+              ? { ...baseFatigueAnalysis, level: "high", painFlag: true, message: "오늘 통증이 표시되어 자동 증량을 보류해요." }
+              : (readiness === "fatigued" || formFailure) && baseFatigueAnalysis.level === "normal"
+                ? {
+                    ...baseFatigueAnalysis,
+                    level: "medium",
+                    message: formFailure
+                      ? "오늘 폼 붕괴가 표시되어 같은 목표를 한 번 더 확인해요."
+                      : "오늘 회복 상태가 피로로 표시되어 증량을 한 번 보류해요.",
+                  }
+                : baseFatigueAnalysis;
+            const recommendationConfidence = getRecommendationConfidence(history, rirReliability, setting.equipment);
+            const recommendation = buildExerciseRecommendation(previous, profile, { rollingE1RM, fatigueAnalysis });
+            if (recommendation) recommendation.sourceDateKey = previous?.dateKey || "";
             const currentE1RM = calculateExerciseE1RM(exercise);
             const previousE1RM = calculateExerciseE1RM(previous);
             const profile1RM = getProfile1RM(profile, exercise.name);
@@ -3168,6 +3557,8 @@ function WorkoutScreen({
             const firstGuide = previous ? null : getFirstLoadGuide(profile, exercise.name);
             const workWeight = exercise.sets[0]?.weight || recommendation?.sets[0]?.weight || firstGuide?.weight || 0;
             const warmups = getWarmupSets(workWeight, exercise.name);
+            const repDrop = getRepDropAnalysis(exercise.sets.length > 0 ? exercise : previous);
+            const lastOutcome = evaluateRecommendationOutcome(previous);
 
             return (
               <article className="workout-exercise-card" key={`${normalizeExerciseName(exercise.name)}-${index}`}>
@@ -3194,6 +3585,22 @@ function WorkoutScreen({
                   </div>
                 </div>
 
+                <div className="exercise-context-controls">
+                  <label>
+                    <span>운동 목표</span>
+                    <select value={setting.trainingGoal} onChange={(event) => onExerciseSettingChange(exercise.name, "trainingGoal", event.target.value)}>
+                      {Object.entries(TRAINING_GOALS).map(([value, option]) => <option key={value} value={value}>{option.label}</option>)}
+                    </select>
+                  </label>
+                  <label>
+                    <span>기구</span>
+                    <select value={setting.equipment} onChange={(event) => onExerciseSettingChange(exercise.name, "equipment", event.target.value)}>
+                      <option value="">미지정</option>
+                      {Object.entries(EQUIPMENT_OPTIONS).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+                    </select>
+                  </label>
+                </div>
+
                 {previous ? (
                   <div className="previous-workout-box">
                     <div>
@@ -3201,6 +3608,7 @@ function WorkoutScreen({
                       <small>{previous.dateKey}</small>
                     </div>
                     <strong>{previous.sets.map((set) => `${formatWorkoutNumber(set.weight)}×${set.reps}`).join(" · ")}</strong>
+                    {lastOutcome && <em className={`recommendation-outcome is-${lastOutcome}`}>{lastOutcome === "success" ? "이전 추천 성공" : "이전 추천 미달"}</em>}
                   </div>
                 ) : (
                   <div className="previous-workout-box is-empty">
@@ -3212,11 +3620,44 @@ function WorkoutScreen({
                 {recommendation && (
                   <div className={`recommendation-box is-${recommendation.type}`}>
                     <div className="recommendation-copy">
-                      <span>다음 추천</span>
+                      <span>다음 추천 · 신뢰도 {recommendationConfidence.label}</span>
                       <strong>{recommendation.sets.map((set) => `${formatWorkoutNumber(set.weight)}×${set.reps}`).join(" · ")}</strong>
                       <small>{recommendation.reason}</small>
                     </div>
                     <button type="button" onClick={() => applyRecommendation(exercise, recommendation)}>추천 입력</button>
+                  </div>
+                )}
+
+                <div className="exercise-metric-grid">
+                  <div>
+                    <span>Rolling e1RM</span>
+                    <strong>{rollingE1RM.value > 0 ? `${formatWorkoutNumber(rollingE1RM.value)}kg` : "-"}</strong>
+                    <small>{rollingE1RM.samples}회 기준</small>
+                  </div>
+                  <div>
+                    <span>최근 추세</span>
+                    <strong className={rollingE1RM.trendPercent < -3 ? "is-down" : rollingE1RM.trendPercent > 1 ? "is-up" : ""}>
+                      {rollingE1RM.samples >= 2 ? `${rollingE1RM.trendPercent > 0 ? "+" : ""}${formatWorkoutNumber(rollingE1RM.trendPercent)}%` : "-"}
+                    </strong>
+                    <small>최대 3회</small>
+                  </div>
+                  <div>
+                    <span>RIR 신뢰도</span>
+                    <strong>{rirReliability.label}</strong>
+                    <small>{Math.round(rirReliability.coverage * 100)}% 입력</small>
+                  </div>
+                </div>
+
+                <div className={`fatigue-signal is-${fatigueAnalysis.level}`}>
+                  <span>피로 신호</span>
+                  <strong>{fatigueAnalysis.level === "high" ? "높음" : fatigueAnalysis.level === "medium" ? "관찰" : "정상"}</strong>
+                  <small>{fatigueAnalysis.message}</small>
+                </div>
+
+                {repDrop && repDrop.level !== "normal" && (
+                  <div className={`rep-drop-alert is-${repDrop.level}`}>
+                    <strong>세트 간 반복수 {formatWorkoutNumber(repDrop.dropPercent)}% 감소</strong>
+                    <span>휴식시간이나 첫 세트 강도가 과하지 않았는지 확인해봐요.</span>
                   </div>
                 )}
 
