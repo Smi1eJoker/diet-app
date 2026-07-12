@@ -178,6 +178,7 @@ function getExternalFoodMetaText(food) {
 const TRAINING_GOALS = {
   strength: { label: "스트렝스", repMin: 3, repMax: 6, targetRir: 2, firstLoadRatio: 0.8 },
   hypertrophy: { label: "근비대", repMin: 6, repMax: 15, targetRir: 2, firstLoadRatio: 0.7 },
+  muscular_strength: { label: "근력", repMin: 5, repMax: 8, targetRir: 2, firstLoadRatio: 0.75 },
   endurance: { label: "근지구력", repMin: 15, repMax: 30, targetRir: 2, firstLoadRatio: 0.55 },
 };
 
@@ -205,7 +206,7 @@ const MUSCLE_GROUP_LABELS = {
 const EXERCISE_MUSCLE_RULES = [
   { keys: ["벤치프레스", "체스트프레스", "덤벨프레스", "플라이", "펙덱"], direct: ["chest"], indirect: ["triceps", "shoulders"] },
   { keys: ["오버헤드프레스", "밀리터리프레스", "숄더프레스", "ohp"], direct: ["shoulders"], indirect: ["triceps"] },
-  { keys: ["레터럴레이즈", "사이드레터럴", "리어델트", "벤트오버레이즈"], direct: ["shoulders"], indirect: [] },
+  { keys: ["레터럴레이즈", "사이드레터럴", "사레레", "리어델트", "벤트오버레이즈"], direct: ["shoulders"], indirect: [] },
   { keys: ["랫풀다운", "풀업", "친업", "바벨로우", "덤벨로우", "시티드로우", "케이블로우", "티바로우"], direct: ["back"], indirect: ["biceps"] },
   { keys: ["풀오버"], direct: ["back"], indirect: ["chest"] },
   { keys: ["바벨컬", "덤벨컬", "해머컬", "프리처컬", "암컬"], direct: ["biceps"], indirect: [] },
@@ -250,16 +251,51 @@ function roundToIncrement(value, increment = 2.5) {
 }
 
 function parseWorkoutSetLine(line) {
-  const match = String(line || "").trim().match(
-    /^(\d+(?:\.\d+)?)\s*(?:kg)?\s*(?:[x×*]\s*)?(\d+)(?:\s*(?:@|rir\s*)(\d+(?:\.\d+)?))?$/i
-  );
-  if (!match) return null;
+  const text = String(line || "").trim().replace(/kg/gi, "");
+  if (!text) return null;
 
-  return {
-    weight: Number(match[1]),
-    reps: Number(match[2]),
-    rir: match[3] === undefined ? null : Number(match[3]),
+  const rirMarker = text.match(/\s*(?:@\s*(?:rir\s*)?|\brir\s*)(\d+(?:\.\d+)?(?:\s*\+\s*\d+(?:\.\d+)?)*)?\s*$/i);
+  const mainText = (rirMarker ? text.slice(0, rirMarker.index) : text).trim();
+  const fields = mainText.replace(/[x×*]/gi, " ").split(/\s+/).filter(Boolean);
+  if (fields.length < 2 || fields.length > 3) return null;
+
+  const parseNumberList = (token) => {
+    const values = String(token || "").split("+").map((value) => Number(value.trim()));
+    return values.length > 0 && values.every((value) => Number.isFinite(value) && value >= 0) ? values : null;
   };
+
+  const weights = parseNumberList(fields[0]);
+  const reps = parseNumberList(fields[1]);
+  const setCount = fields[2] === undefined ? 1 : Number(fields[2]);
+  const rirValues = rirMarker?.[1] ? parseNumberList(rirMarker[1].replace(/\s+/g, "")) : null;
+  if (!weights || !reps || !Number.isInteger(setCount) || setCount < 1 || setCount > 30) return null;
+
+  const partCount = Math.max(weights.length, reps.length, rirValues?.length || 0, 1);
+  const expandValues = (values, fallback = null) => {
+    if (!values?.length) return Array(partCount).fill(fallback);
+    if (values.length === 1) return Array(partCount).fill(values[0]);
+    return values.length === partCount ? values : null;
+  };
+  const expandedWeights = expandValues(weights);
+  const expandedReps = expandValues(reps);
+  const expandedRir = expandValues(rirValues, null);
+  if (!expandedWeights || !expandedReps || !expandedRir) return null;
+
+  const template = {
+    weight: expandedWeights[0],
+    reps: expandedReps[0],
+    rir: expandedRir.filter((value) => value !== null).length > 0
+      ? Math.min(...expandedRir.filter((value) => value !== null))
+      : null,
+    parts: partCount > 1
+      ? expandedWeights.map((weight, index) => ({ weight, reps: expandedReps[index], rir: expandedRir[index] }))
+      : null,
+  };
+
+  return Array.from({ length: setCount }, () => ({
+    ...template,
+    parts: template.parts ? template.parts.map((part) => ({ ...part })) : null,
+  }));
 }
 
 function parseWorkoutMemo(value) {
@@ -270,16 +306,17 @@ function parseWorkoutMemo(value) {
     const line = rawLine.trim();
     if (!line) return;
 
-    const parsedSet = parseWorkoutSetLine(line);
-    if (parsedSet && currentExercise) {
-      currentExercise.sets.push(parsedSet);
+    const parsedSets = parseWorkoutSetLine(line);
+    if (parsedSets && currentExercise) {
+      currentExercise.sets.push(...parsedSets);
       return;
     }
 
-    if (!parsedSet) {
+    if (!parsedSets) {
+      const normalizedExerciseLine = line.replace(/\s*\+\s*/g, " + ").replace(/\s{2,}/g, " ");
       currentExercise = {
-        id: "exercise-" + normalizeExerciseName(line),
-        name: line,
+        id: "exercise-" + normalizeExerciseName(normalizedExerciseLine),
+        name: normalizedExerciseLine,
         sets: [],
       };
       exercises.push(currentExercise);
@@ -297,10 +334,37 @@ function formatWorkoutMemo(exercises) {
   return (exercises || [])
     .map((exercise) => [
       exercise.name,
-      ...(exercise.sets || []).map((set) => {
-        const rirText = set.rir === null || set.rir === undefined ? "" : " @" + formatWorkoutNumber(set.rir);
-        return `${formatWorkoutNumber(set.weight)} ${set.reps}${rirText}`;
-      }),
+      ...(() => {
+        const groups = [];
+        (exercise.sets || []).forEach((set) => {
+          const signature = JSON.stringify({
+            weight: set.weight,
+            reps: set.reps,
+            rir: set.rir,
+            parts: set.parts || null,
+          });
+          const lastGroup = groups.at(-1);
+          if (lastGroup?.signature === signature) lastGroup.count += 1;
+          else groups.push({ signature, set, count: 1 });
+        });
+
+        return groups.map(({ set, count }) => {
+          const parts = set.parts?.length > 1 ? set.parts : null;
+          const weightText = parts
+            ? parts.map((part) => formatWorkoutNumber(part.weight)).join("+")
+            : formatWorkoutNumber(set.weight);
+          const repsText = parts
+            ? parts.map((part) => formatWorkoutNumber(part.reps)).join("+")
+            : formatWorkoutNumber(set.reps);
+          const partRirs = parts?.map((part) => part.rir).filter((value) => value !== null && value !== undefined) || [];
+          const rirText = partRirs.length > 0
+            ? ` @RIR ${partRirs.length === parts.length ? partRirs.map(formatWorkoutNumber).join("+") : formatWorkoutNumber(set.rir)}`
+            : set.rir === null || set.rir === undefined
+              ? ""
+              : ` @RIR ${formatWorkoutNumber(set.rir)}`;
+          return `${weightText} X ${repsText} X ${count}${rirText}`;
+        });
+      })(),
     ].join("\n"))
     .join("\n\n");
 }
@@ -344,9 +408,16 @@ function getExerciseHistory(dailyRecords, selectedDateKey, exerciseName, equipme
 }
 
 function getExerciseMuscleMap(exerciseName) {
-  const normalizedName = normalizeExerciseName(exerciseName);
-  const rule = EXERCISE_MUSCLE_RULES.find((item) => item.keys.some((key) => normalizedName.includes(normalizeExerciseName(key))));
-  return rule || { direct: [], indirect: [] };
+  const exerciseNames = String(exerciseName || "").split("+").map((name) => normalizeExerciseName(name)).filter(Boolean);
+  const combined = exerciseNames.reduce((acc, normalizedName) => {
+    const rule = EXERCISE_MUSCLE_RULES.find((item) => item.keys.some((key) => normalizedName.includes(normalizeExerciseName(key))));
+    if (!rule) return acc;
+    return {
+      direct: [...new Set([...acc.direct, ...rule.direct])],
+      indirect: [...new Set([...acc.indirect, ...rule.indirect])],
+    };
+  }, { direct: [], indirect: [] });
+  return combined;
 }
 
 function getSetStimulusWeight(set) {
@@ -390,10 +461,10 @@ function calculateWeeklyVolume(dailyRecords, selectedDateKey, currentEntries = [
   };
 }
 
-function getExerciseSetting(profile, exerciseName) {
+function getExerciseSetting(profile, exerciseName, trainingGoalOverride = "") {
   const exerciseKey = normalizeExerciseName(exerciseName);
   const savedSetting = profile.exerciseSettings?.[exerciseKey] || {};
-  const trainingGoal = savedSetting.trainingGoal || profile.trainingGoal || "hypertrophy";
+  const trainingGoal = trainingGoalOverride || savedSetting.trainingGoal || profile.trainingGoal || "hypertrophy";
 
   return {
     trainingGoal,
@@ -459,6 +530,15 @@ function evaluateRecommendationOutcome(entry) {
   const comparedCount = Math.min(recommendation.sets.length, entry.sets.length);
   const achieved = entry.sets.slice(0, comparedCount).every((actual, index) => {
     const target = recommendation.sets[index];
+    if (target.parts?.length) {
+      if (!actual.parts?.length || actual.parts.length !== target.parts.length) return false;
+      return target.parts.every((targetPart, partIndex) => {
+        const actualPart = actual.parts[partIndex];
+        const targetMet = actualPart.weight >= targetPart.weight && actualPart.reps >= targetPart.reps;
+        const effortAcceptable = actualPart.rir === null || actualPart.rir === undefined || actualPart.rir >= Math.max(0, (targetPart.rir ?? 2) - 1);
+        return targetMet && effortAcceptable;
+      });
+    }
     const targetMet = actual.weight >= target.weight && actual.reps >= target.reps;
     const effortAcceptable = actual.rir === null || actual.rir === undefined || actual.rir >= Math.max(0, (target.rir ?? 2) - 1);
     return targetMet && effortAcceptable;
@@ -557,10 +637,10 @@ function getProfile1RM(profile, exerciseName) {
   return toNumber(profile[fieldMap[coreLift]]);
 }
 
-function getFirstLoadGuide(profile, exerciseName) {
+function getFirstLoadGuide(profile, exerciseName, trainingGoalOverride = "") {
   const oneRm = getProfile1RM(profile, exerciseName);
   if (oneRm <= 0) return null;
-  const setting = getExerciseSetting(profile, exerciseName);
+  const setting = getExerciseSetting(profile, exerciseName, trainingGoalOverride);
   const increment = getExerciseIncrement(exerciseName);
   return {
     weight: roundToIncrement(oneRm * setting.firstLoadRatio, increment),
@@ -569,10 +649,47 @@ function getFirstLoadGuide(profile, exerciseName) {
   };
 }
 
+function updateWorkoutSetParts(set, updater) {
+  if (!set.parts?.length) return updater({ ...set });
+  const nextParts = set.parts.map((part, index) => updater({ ...part }, index));
+  const rirValues = nextParts.map((part) => part.rir).filter((value) => value !== null && value !== undefined);
+  return {
+    ...set,
+    weight: nextParts[0].weight,
+    reps: nextParts[0].reps,
+    rir: rirValues.length > 0 ? Math.min(...rirValues) : null,
+    parts: nextParts,
+  };
+}
+
+function getSetMinimumReps(set) {
+  return set.parts?.length ? Math.min(...set.parts.map((part) => part.reps)) : set.reps;
+}
+
+function formatWorkoutSetSummary(sets) {
+  const groups = [];
+  (sets || []).forEach((set) => {
+    const signature = JSON.stringify({ weight: set.weight, reps: set.reps, parts: set.parts || null });
+    const lastGroup = groups.at(-1);
+    if (lastGroup?.signature === signature) lastGroup.count += 1;
+    else groups.push({ signature, set, count: 1 });
+  });
+
+  return groups.map(({ set, count }) => {
+    const weights = set.parts?.length
+      ? set.parts.map((part) => formatWorkoutNumber(part.weight)).join("+")
+      : formatWorkoutNumber(set.weight);
+    const reps = set.parts?.length
+      ? set.parts.map((part) => formatWorkoutNumber(part.reps)).join("+")
+      : formatWorkoutNumber(set.reps);
+    return `${weights}×${reps}×${count}`;
+  }).join(" · ");
+}
+
 function buildExerciseRecommendation(previous, profile, context = {}) {
   if (!previous?.sets?.length) return null;
 
-  const setting = getExerciseSetting(profile, previous.name);
+  const setting = getExerciseSetting(profile, previous.name, context.trainingPurpose || "");
   const increment = getExerciseIncrement(previous.name);
   const sets = previous.sets.map((set) => ({ ...set }));
   const fatigueAnalysis = context.fatigueAnalysis || { level: "normal", painFlag: false };
@@ -596,11 +713,11 @@ function buildExerciseRecommendation(previous, profile, context = {}) {
       type: "recovery",
       label: "회복 조정 -5%",
       reason: `${fatigueAnalysis.message} ${bodyGoalFeedback}`,
-      sets: sets.map((set) => ({
-        ...set,
-        weight: roundToIncrement(set.weight * 0.95, increment),
+      sets: sets.map((set) => updateWorkoutSetParts(set, (part) => ({
+        ...part,
+        weight: roundToIncrement(part.weight * 0.95, increment),
         rir: Math.min(5, setting.targetRir + 1),
-      })),
+      }))),
       setting,
     };
   }
@@ -619,6 +736,14 @@ function buildExerciseRecommendation(previous, profile, context = {}) {
 
   if (setting.progressionMode === "load") {
     const nextSets = sets.map((set) => {
+      if (set.parts?.length) {
+        return updateWorkoutSetParts(set, (part) => ({
+          ...part,
+          weight: roundToIncrement(part.weight + increment, increment),
+          reps: Math.max(setting.repMin, Math.min(setting.repMax, part.reps - 2)),
+          rir: setting.targetRir,
+        }));
+      }
       const nextWeight = roundToIncrement(set.weight + increment, increment);
       const setE1RM = context.rollingE1RM?.value || calculateSetE1RM(set);
       const predictedReps = getCoreLiftKey(previous.name) && setE1RM > 0
@@ -642,18 +767,18 @@ function buildExerciseRecommendation(previous, profile, context = {}) {
     };
   }
 
-  const reachedRepCeiling = sets.every((set) => set.reps >= setting.repMax);
+  const reachedRepCeiling = sets.every((set) => getSetMinimumReps(set) >= setting.repMax);
   if (reachedRepCeiling) {
     return {
       type: "load",
       label: `중량 +${formatWorkoutNumber(increment)}kg`,
       reason: `모든 세트가 반복 상한 ${setting.repMax}회에 도달해 중량을 올리고 반복 하한으로 돌아가요. ${bodyGoalFeedback}`,
-      sets: sets.map((set) => ({
-        ...set,
-        weight: roundToIncrement(set.weight + increment, increment),
+      sets: sets.map((set) => updateWorkoutSetParts(set, (part) => ({
+        ...part,
+        weight: roundToIncrement(part.weight + increment, increment),
         reps: setting.repMin,
         rir: setting.targetRir,
-      })),
+      }))),
       setting,
     };
   }
@@ -662,14 +787,21 @@ function buildExerciseRecommendation(previous, profile, context = {}) {
   const hasExtraReserve = hasAllRir && Math.min(...rirValues) >= setting.targetRir + 1;
 
   if (hasExtraReserve) {
-    nextSets.forEach((set) => {
-      set.reps = Math.min(setting.repMax, set.reps + 1);
-      set.rir = setting.targetRir;
+    nextSets.forEach((set, index) => {
+      nextSets[index] = updateWorkoutSetParts(set, (part) => ({
+        ...part,
+        reps: Math.min(setting.repMax, part.reps + 1),
+        rir: setting.targetRir,
+      }));
     });
   } else {
-    const targetIndex = [...nextSets].map((set) => set.reps).lastIndexOf(Math.min(...nextSets.map((set) => set.reps)));
-    nextSets[targetIndex].reps = Math.min(setting.repMax, nextSets[targetIndex].reps + 1);
-    nextSets[targetIndex].rir = setting.targetRir;
+    const minimumReps = Math.min(...nextSets.map(getSetMinimumReps));
+    const targetIndex = [...nextSets].map(getSetMinimumReps).lastIndexOf(minimumReps);
+    nextSets[targetIndex] = updateWorkoutSetParts(nextSets[targetIndex], (part) => ({
+      ...part,
+      reps: Math.min(setting.repMax, part.reps + 1),
+      rir: setting.targetRir,
+    }));
   }
 
   return {
@@ -3314,6 +3446,20 @@ function RecordViewSwitch({ value, onChange }) {
   );
 }
 
+function getWorkoutSetSpaceExpansion(lineBeforeCursor) {
+  if (/@|\brir\b/i.test(lineBeforeCursor)) return null;
+  const numberToken = "\\d+(?:\\.\\d+)?(?:\\+\\d+(?:\\.\\d+)?)*";
+  const normalized = String(lineBeforeCursor || "")
+    .replace(/\s*[x×*]\s*/gi, " X ")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  if (new RegExp(`^${numberToken}$`).test(normalized)) return `${normalized} X `;
+  if (new RegExp(`^${numberToken} X ${numberToken}$`).test(normalized)) return `${normalized} X `;
+  if (new RegExp(`^${numberToken} X ${numberToken} X \\d+$`).test(normalized)) return `${normalized} @RIR `;
+  return null;
+}
+
 function WorkoutScreen({
   selectedDateKey,
   savedEntries,
@@ -3324,9 +3470,7 @@ function WorkoutScreen({
 }) {
   const [memo, setMemo] = useState(() => formatWorkoutMemo(savedEntries));
   const [statusMessage, setStatusMessage] = useState("");
-  const [readiness, setReadiness] = useState(() => dailyRecords[selectedDateKey]?.workoutSession?.readiness || "normal");
-  const [painFlag, setPainFlag] = useState(() => Boolean(dailyRecords[selectedDateKey]?.workoutSession?.painFlag));
-  const [formFailure, setFormFailure] = useState(() => Boolean(dailyRecords[selectedDateKey]?.workoutSession?.formFailure));
+  const [trainingPurpose, setTrainingPurpose] = useState(() => dailyRecords[selectedDateKey]?.workoutSession?.trainingPurpose || profile.trainingGoal || "hypertrophy");
   const [recommendationDrafts, setRecommendationDrafts] = useState(() =>
     (savedEntries || []).reduce((acc, entry) => entry.recommendation
       ? { ...acc, [normalizeExerciseName(entry.name)]: entry.recommendation }
@@ -3336,9 +3480,7 @@ function WorkoutScreen({
   useEffect(() => {
     setMemo(formatWorkoutMemo(savedEntries));
     setStatusMessage("");
-    setReadiness(dailyRecords[selectedDateKey]?.workoutSession?.readiness || "normal");
-    setPainFlag(Boolean(dailyRecords[selectedDateKey]?.workoutSession?.painFlag));
-    setFormFailure(Boolean(dailyRecords[selectedDateKey]?.workoutSession?.formFailure));
+    setTrainingPurpose(dailyRecords[selectedDateKey]?.workoutSession?.trainingPurpose || profile.trainingGoal || "hypertrophy");
     setRecommendationDrafts((savedEntries || []).reduce((acc, entry) => entry.recommendation
       ? { ...acc, [normalizeExerciseName(entry.name)]: entry.recommendation }
       : acc, {}));
@@ -3353,13 +3495,13 @@ function WorkoutScreen({
   );
   const recommendationAccuracy = useMemo(() => getRecommendationAccuracy(dailyRecords), [dailyRecords]);
   const fatigueSummaries = draftExercises.map((exercise) => {
-    const setting = getExerciseSetting(profile, exercise.name);
+    const setting = getExerciseSetting(profile, exercise.name, trainingPurpose);
     const history = getExerciseHistory(dailyRecords, selectedDateKey, exercise.name, setting.equipment);
     const rolling = getRollingE1RM(history, exercise);
     return getFatigueAnalysis(history, rolling);
   });
   const highFatigueCount = fatigueSummaries.filter((item) => item.level === "high").length;
-  const shouldShowRecoveryAlert = painFlag || highFatigueCount >= 2 || (readiness === "fatigued" && highFatigueCount >= 1);
+  const shouldShowRecoveryAlert = highFatigueCount >= 2;
 
   const applyRecommendation = (exercise, recommendation) => {
     if (!recommendation) return;
@@ -3377,10 +3519,54 @@ function WorkoutScreen({
         label: recommendation.label,
         sourceDateKey: recommendation.sourceDateKey || "",
         appliedAt: new Date().toISOString(),
-        sets: recommendation.sets.map((set) => ({ weight: set.weight, reps: set.reps, rir: set.rir })),
+        sets: recommendation.sets.map((set) => ({
+          weight: set.weight,
+          reps: set.reps,
+          rir: set.rir,
+          parts: set.parts?.map((part) => ({ ...part })) || null,
+        })),
       },
     }));
     setStatusMessage(`${exercise.name}: ${recommendation.label} 추천을 입력했어요.`);
+  };
+
+  const replaceMemoRange = (target, start, end, replacement) => {
+    const nextMemo = memo.slice(0, start) + replacement + memo.slice(end);
+    const nextCursor = start + replacement.length;
+    setMemo(nextMemo);
+    setStatusMessage("");
+    requestAnimationFrame(() => {
+      target.focus();
+      target.setSelectionRange(nextCursor, nextCursor);
+    });
+  };
+
+  const handleWorkoutMemoKeyDown = (event) => {
+    const target = event.currentTarget;
+    const cursor = target.selectionStart ?? memo.length;
+    if (cursor !== (target.selectionEnd ?? cursor)) return;
+    const lineStart = memo.lastIndexOf("\n", Math.max(0, cursor - 1)) + 1;
+    const lineBeforeCursor = memo.slice(lineStart, cursor);
+
+    if (event.key === "+" && /[A-Za-z가-힣]/.test(lineBeforeCursor)) {
+      event.preventDefault();
+      const prefix = lineBeforeCursor.trimEnd();
+      replaceMemoRange(target, lineStart, cursor, `${prefix} + `);
+      return;
+    }
+
+    if (event.key !== " ") return;
+    const setExpansion = getWorkoutSetSpaceExpansion(lineBeforeCursor);
+    if (setExpansion) {
+      event.preventDefault();
+      replaceMemoRange(target, lineStart, cursor, setExpansion);
+      return;
+    }
+
+    if (lineBeforeCursor.endsWith(" ") && /[A-Za-z가-힣]/.test(lineBeforeCursor) && !lineBeforeCursor.trim().endsWith("+")) {
+      event.preventDefault();
+      replaceMemoRange(target, lineStart, cursor, `${lineBeforeCursor.trimEnd()} + `);
+    }
   };
 
   const saveWorkout = (event) => {
@@ -3390,21 +3576,19 @@ function WorkoutScreen({
       .map((exercise) => ({
         ...exercise,
         id: `${selectedDateKey}-${normalizeExerciseName(exercise.name)}`,
-        equipment: getExerciseSetting(profile, exercise.name).equipment || "",
-        trainingGoal: getExerciseSetting(profile, exercise.name).trainingGoal,
+        equipment: getExerciseSetting(profile, exercise.name, trainingPurpose).equipment || "",
+        trainingGoal: getExerciseSetting(profile, exercise.name, trainingPurpose).trainingGoal,
         recommendation: recommendationDrafts[normalizeExerciseName(exercise.name)] || null,
         sets: exercise.sets.map((set, index) => ({ ...set, setIndex: index + 1, type: "working" })),
       }));
 
     if (memo.trim() && validEntries.length === 0) {
-      setStatusMessage("운동명 아래에 ‘중량 반복수 @RIR’ 형식으로 한 세트 이상 입력해줘.");
+      setStatusMessage("운동명 아래에 ‘중량 X 반복수 X 세트 수’ 형식으로 입력해줘. RIR은 생략해도 돼요.");
       return;
     }
 
     onSave(validEntries, {
-      readiness,
-      painFlag,
-      formFailure,
+      trainingPurpose,
       savedAt: new Date().toISOString(),
     });
     setMemo(formatWorkoutMemo(validEntries));
@@ -3413,22 +3597,20 @@ function WorkoutScreen({
 
   return (
     <section className="workout-screen" aria-label="운동 기록">
-      <section className="workout-readiness-card">
-        <div className="workout-readiness-head">
+      <section className="workout-purpose-card">
+        <div className="workout-purpose-head">
           <div>
-            <strong>오늘 회복 상태</strong>
-            <small>추천 강도를 조정하는 보조 정보예요.</small>
+            <strong>오늘 훈련 목적</strong>
+            <small>오늘 기록의 반복 범위와 추천 기준에 반영돼요.</small>
           </div>
-          <span className={`readiness-badge is-${readiness}`}>{readiness === "good" ? "좋음" : readiness === "fatigued" ? "피로" : "보통"}</span>
+          <span className="training-purpose-badge">{TRAINING_GOALS[trainingPurpose]?.label || "근비대"}</span>
         </div>
-        <div className="readiness-options" role="group" aria-label="오늘 회복 상태">
-          <button type="button" className={readiness === "good" ? "is-active" : ""} onClick={() => setReadiness("good")}>좋음</button>
-          <button type="button" className={readiness === "normal" ? "is-active" : ""} onClick={() => setReadiness("normal")}>보통</button>
-          <button type="button" className={readiness === "fatigued" ? "is-active" : ""} onClick={() => setReadiness("fatigued")}>피로</button>
-        </div>
-        <div className="workout-condition-flags">
-          <button type="button" className={painFlag ? "is-active is-warning" : ""} onClick={() => setPainFlag((current) => !current)}>통증 {painFlag ? "있음" : "없음"}</button>
-          <button type="button" className={formFailure ? "is-active" : ""} onClick={() => setFormFailure((current) => !current)}>폼 붕괴 {formFailure ? "있음" : "없음"}</button>
+        <div className="training-purpose-options" role="group" aria-label="오늘 훈련 목적">
+          {Object.entries(TRAINING_GOALS).map(([value, option]) => (
+            <button key={value} type="button" className={trainingPurpose === value ? "is-active" : ""} onClick={() => setTrainingPurpose(value)}>
+              {option.label}
+            </button>
+          ))}
         </div>
       </section>
 
@@ -3436,7 +3618,7 @@ function WorkoutScreen({
         <section className="workout-recovery-alert">
           <strong>회복 주간 고려</strong>
           <span>여러 운동에서 피로 신호가 겹쳤어요. 앱은 세트 수를 바꾸지 않고 중량만 약 5% 낮춰 추천해요.</span>
-          <small>정해진 주기로 강제하지 않으며, 통증이 있으면 자동 증량을 보류해요.</small>
+          <small>정해진 주기로 강제하지 않고 최근 수행 추세가 누적됐을 때만 표시해요.</small>
         </section>
       )}
 
@@ -3457,8 +3639,9 @@ function WorkoutScreen({
               setMemo(event.target.value);
               setStatusMessage("");
             }}
+            onKeyDown={handleWorkoutMemoKeyDown}
             rows={Math.max(10, memo.split(/\r?\n/).length + 2)}
-            placeholder={`벤치프레스\n100 5 @2\n100 5 @2\n100 5 @1\n\n인클라인 덤벨프레스\n35 10 @2\n35 9 @1\n35 8 @1`}
+            placeholder={`벤치프레스\n100 X 5 X 3 @RIR 2\n\n인클라인 덤벨프레스\n35 X 10 X 1\n35 X 9 X 1\n35 X 8 X 1\n\n사레레 + 해머컬\n9+16 X 20+10 X 3`}
             lang="ko-KR"
             autoCapitalize="off"
             autoCorrect="off"
@@ -3467,8 +3650,9 @@ function WorkoutScreen({
 
           <div className="workout-format-guide">
             <strong>입력 형식</strong>
-            <span>중량 반복수 @RIR</span>
-            <small>RIR을 모르면 ‘100 5’처럼 생략해도 돼요.</small>
+            <span>중량 X 반복수 X 세트 수 @RIR</span>
+            <small>숫자 뒤 스페이스 → X · 세트 수 뒤 스페이스 → @RIR · 운동명에서 스페이스 두 번 → +</small>
+            <small>RIR은 선택이라 ‘60 X 12 X 3’까지만 입력해도 저장돼요.</small>
           </div>
 
           {statusMessage && <p className={statusMessage.includes("입력해줘") ? "form-error" : "workout-status"}>{statusMessage}</p>}
@@ -3528,25 +3712,14 @@ function WorkoutScreen({
       {draftExercises.length > 0 && (
         <section className="workout-analysis-list" aria-label="운동 추천 분석">
           {draftExercises.map((exercise, index) => {
-            const setting = getExerciseSetting(profile, exercise.name);
+            const setting = getExerciseSetting(profile, exercise.name, trainingPurpose);
             const history = getExerciseHistory(dailyRecords, selectedDateKey, exercise.name, setting.equipment);
             const previous = history[0] || null;
             const rollingE1RM = getRollingE1RM(history, exercise);
             const rirReliability = getRirReliability(history, exercise);
-            const baseFatigueAnalysis = getFatigueAnalysis(history, rollingE1RM);
-            const fatigueAnalysis = painFlag
-              ? { ...baseFatigueAnalysis, level: "high", painFlag: true, message: "오늘 통증이 표시되어 자동 증량을 보류해요." }
-              : (readiness === "fatigued" || formFailure) && baseFatigueAnalysis.level === "normal"
-                ? {
-                    ...baseFatigueAnalysis,
-                    level: "medium",
-                    message: formFailure
-                      ? "오늘 폼 붕괴가 표시되어 같은 목표를 한 번 더 확인해요."
-                      : "오늘 회복 상태가 피로로 표시되어 증량을 한 번 보류해요.",
-                  }
-                : baseFatigueAnalysis;
+            const fatigueAnalysis = getFatigueAnalysis(history, rollingE1RM);
             const recommendationConfidence = getRecommendationConfidence(history, rirReliability, setting.equipment);
-            const recommendation = buildExerciseRecommendation(previous, profile, { rollingE1RM, fatigueAnalysis });
+            const recommendation = buildExerciseRecommendation(previous, profile, { rollingE1RM, fatigueAnalysis, trainingPurpose });
             if (recommendation) recommendation.sourceDateKey = previous?.dateKey || "";
             const currentE1RM = calculateExerciseE1RM(exercise);
             const previousE1RM = calculateExerciseE1RM(previous);
@@ -3554,7 +3727,7 @@ function WorkoutScreen({
             const estimatedRir = exercise.sets[0]?.rir === null || exercise.sets[0]?.rir === undefined
               ? estimateSetRIR(exercise.sets[0], profile1RM || previousE1RM)
               : null;
-            const firstGuide = previous ? null : getFirstLoadGuide(profile, exercise.name);
+            const firstGuide = previous ? null : getFirstLoadGuide(profile, exercise.name, trainingPurpose);
             const workWeight = exercise.sets[0]?.weight || recommendation?.sets[0]?.weight || firstGuide?.weight || 0;
             const warmups = getWarmupSets(workWeight, exercise.name);
             const repDrop = getRepDropAnalysis(exercise.sets.length > 0 ? exercise : previous);
@@ -3585,13 +3758,7 @@ function WorkoutScreen({
                   </div>
                 </div>
 
-                <div className="exercise-context-controls">
-                  <label>
-                    <span>운동 목표</span>
-                    <select value={setting.trainingGoal} onChange={(event) => onExerciseSettingChange(exercise.name, "trainingGoal", event.target.value)}>
-                      {Object.entries(TRAINING_GOALS).map(([value, option]) => <option key={value} value={value}>{option.label}</option>)}
-                    </select>
-                  </label>
+                <div className="exercise-context-controls is-single">
                   <label>
                     <span>기구</span>
                     <select value={setting.equipment} onChange={(event) => onExerciseSettingChange(exercise.name, "equipment", event.target.value)}>
@@ -3607,7 +3774,7 @@ function WorkoutScreen({
                       <span>이전 기록</span>
                       <small>{previous.dateKey}</small>
                     </div>
-                    <strong>{previous.sets.map((set) => `${formatWorkoutNumber(set.weight)}×${set.reps}`).join(" · ")}</strong>
+                    <strong>{formatWorkoutSetSummary(previous.sets)}</strong>
                     {lastOutcome && <em className={`recommendation-outcome is-${lastOutcome}`}>{lastOutcome === "success" ? "이전 추천 성공" : "이전 추천 미달"}</em>}
                   </div>
                 ) : (
@@ -3621,7 +3788,7 @@ function WorkoutScreen({
                   <div className={`recommendation-box is-${recommendation.type}`}>
                     <div className="recommendation-copy">
                       <span>다음 추천 · 신뢰도 {recommendationConfidence.label}</span>
-                      <strong>{recommendation.sets.map((set) => `${formatWorkoutNumber(set.weight)}×${set.reps}`).join(" · ")}</strong>
+                      <strong>{formatWorkoutSetSummary(recommendation.sets)}</strong>
                       <small>{recommendation.reason}</small>
                     </div>
                     <button type="button" onClick={() => applyRecommendation(exercise, recommendation)}>추천 입력</button>

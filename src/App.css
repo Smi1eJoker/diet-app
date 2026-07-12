@@ -4932,7 +4932,7 @@ textarea,
 
 .training-choice-grid {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 7px;
 }
 
@@ -4972,6 +4972,7 @@ textarea,
 
 /* workout v2: autoregulation, fatigue and volume analytics */
 .workout-readiness-card,
+.workout-purpose-card,
 .workout-v2-dashboard {
   display: grid;
   gap: 13px;
@@ -4982,6 +4983,7 @@ textarea,
 }
 
 .workout-readiness-head,
+.workout-purpose-head,
 .workout-dashboard-head {
   display: flex;
   align-items: flex-start;
@@ -4990,17 +4992,20 @@ textarea,
 }
 
 .workout-readiness-head > div,
+.workout-purpose-head > div,
 .workout-dashboard-head > div:first-child {
   display: grid;
   gap: 4px;
 }
 
 .workout-readiness-head strong,
+.workout-purpose-head strong,
 .workout-dashboard-head strong {
   font-size: 14px;
 }
 
 .workout-readiness-head small,
+.workout-purpose-head small,
 .workout-dashboard-head small {
   color: #818181;
   font-size: 10.5px;
@@ -5026,6 +5031,40 @@ textarea,
 .readiness-badge.is-fatigued {
   background: rgba(255, 187, 92, 0.13);
   color: #ffc56f;
+}
+
+.training-purpose-badge {
+  flex: 0 0 auto;
+  padding: 5px 9px;
+  border-radius: 999px;
+  background: rgba(155, 140, 255, 0.14);
+  color: #bbb2ff;
+  font-size: 10.5px;
+  font-weight: 900;
+}
+
+.training-purpose-options {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.training-purpose-options button {
+  min-width: 0;
+  height: 38px;
+  padding: 0 4px;
+  border: 1px solid #303030;
+  border-radius: 10px;
+  background: #0b0b0b;
+  color: #8c8c8c;
+  font-size: 10.5px;
+  font-weight: 900;
+}
+
+.training-purpose-options button.is-active {
+  border-color: #6f64b9;
+  background: rgba(155, 140, 255, 0.15);
+  color: #c8c2ff;
 }
 
 .readiness-options {
@@ -5171,6 +5210,10 @@ textarea,
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 7px;
+}
+
+.exercise-context-controls.is-single {
+  grid-template-columns: 1fr;
 }
 
 .exercise-context-controls label {
