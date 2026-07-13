@@ -14,13 +14,6 @@ export const DEFAULT_PROFILE = {
   cardioMinutes: "",
   jobActivity: "",
   goal: "",
-  trainingGoal: "hypertrophy",
-  progressionMode: "reps",
-  squat1RM: "",
-  bench1RM: "",
-  deadlift1RM: "",
-  ohp1RM: "",
-  exerciseSettings: {},
 };
 
 export const FALLBACK_PROFILE = {
@@ -39,13 +32,6 @@ export const FALLBACK_PROFILE = {
   cardioMinutes: 30,
   jobActivity: "light",
   goal: "maintain",
-  trainingGoal: "hypertrophy",
-  progressionMode: "reps",
-  squat1RM: 160,
-  bench1RM: 100,
-  deadlift1RM: 160,
-  ohp1RM: 60,
-  exerciseSettings: {},
 };
 
 export const GOAL_OPTIONS = {
