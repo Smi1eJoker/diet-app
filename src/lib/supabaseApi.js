@@ -123,14 +123,23 @@ export async function fetchFoodDatabase(session) {
   const accessToken = session?.access_token;
   const userId = getSessionUserId(session);
 
-  const appFoodsPath = "/app_foods?select=app_food_id,display_name,raw_food_id,category,default_unit,default_amount,search_priority,raw_foods(raw_food_id,raw_name,kcal_per_100g,carb_g_per_100g,protein_g_per_100g,fat_g_per_100g)&order=search_priority.desc,display_name.asc";
+  const appFoodsSelect = "app_food_id,display_name,raw_food_id,category,default_unit,default_amount,search_priority,raw_foods(raw_food_id,raw_name,kcal_per_100g,carb_g_per_100g,protein_g_per_100g,fat_g_per_100g)";
+  const activeAppFoodsPath = "/app_foods?select=" + appFoodsSelect + "&is_active=eq.true&order=search_priority.desc,display_name.asc";
+  const legacyAppFoodsPath = "/app_foods?select=" + appFoodsSelect + "&order=search_priority.desc,display_name.asc";
   const foodSearchTermsPath = "/food_search_terms?select=term_id,term_text,term_norm,app_food_id,weight&order=weight.desc,term_text.asc";
   const foodUnitsPath = "/food_units?select=unit_id,app_food_id,unit_name,grams,is_default,aliases&order=app_food_id.asc,unit_name.asc";
   const userFoodUnitsPath = "/user_food_units?select=user_unit_id,user_id,app_food_id,user_food_id,unit_name,unit_norm,grams,created_at,updated_at&user_id=eq." + encodeURIComponent(userId || "") + "&order=updated_at.desc,unit_name.asc";
 
   // 기본 음식 DB는 사용자 로그인 토큰이 아니라 anon/publishable key로 불러온다.
   // 저장된 로그인 토큰이 만료되어도 app_foods/raw_foods는 계속 매칭되어야 한다.
-  const appFoodsPromise = requestSupabaseRest(appFoodsPath, {}, null);
+  const appFoodsPromise = requestSupabaseRest(activeAppFoodsPath, {}, null).catch((error) => {
+    // is_active 마이그레이션을 아직 적용하지 않은 환경은 기존 전체 조회로 호환한다.
+    const message = String(error?.message || "").toLowerCase();
+    if (message.includes("is_active") || message.includes("column") || message.includes("schema cache")) {
+      return requestSupabaseRest(legacyAppFoodsPath, {}, null);
+    }
+    throw error;
+  });
 
   // food_search_terms는 후보 추천 품질을 올리는 선택 테이블이다.
   // 아직 테이블을 만들지 않았거나 권한이 없어도 앱 본체는 그대로 동작해야 한다.
@@ -480,68 +489,20 @@ export async function upsertUserDailyLog(session, dateKey, meals, dailyRecord) {
   return Array.isArray(rows) && rows[0] ? rows[0] : payload;
 }
 
-export function toExternalFoodEntry(row) {
-  const displayName = cleanFoodName(row.display_name || row.food_name || "");
-
-  return {
-    id: "external-" + (row.external_food_id || normalize(displayName)),
-    externalFoodId: row.external_food_id || null,
-    name: displayName,
-    canonicalName: displayName,
-    maker: row.maker || "",
-    category: row.category || "",
-    subCategory: row.sub_category || "",
-    originName: row.origin_name || "",
-    baseAmount: toNumber(row.basis_amount) || 100,
-    basisUnit: row.basis_unit || "g",
-    kcal: toNumber(row.kcal_per_100),
-    carb: toNumber(row.carb_g_per_100),
-    protein: toNumber(row.protein_g_per_100),
-    fat: toNumber(row.fat_g_per_100),
-    sugar: toNumber(row.sugar_g_per_100),
-    sodium: toNumber(row.sodium_mg_per_100),
-    saturatedFat: toNumber(row.saturated_fat_g_per_100),
-    transFat: toNumber(row.trans_fat_g_per_100),
-    source: "external_food",
-    sourceLabel: "외부 음식 DB",
-    displayName,
-  };
-}
-
 export async function searchExternalFoods(query, limit = 20) {
   const keyword = cleanFoodName(query);
-  const normalized = normalize(keyword);
-
-  if (!normalized) return [];
+  if (!normalize(keyword)) return [];
 
   const safeLimit = Math.min(Math.max(toNumber(limit) || 20, 1), 50);
-  const columns = [
-    "external_food_id",
-    "food_name",
-    "display_name",
-    "category",
-    "sub_category",
-    "origin_name",
-    "maker",
-    "basis_amount",
-    "basis_unit",
-    "kcal_per_100",
-    "carb_g_per_100",
-    "protein_g_per_100",
-    "fat_g_per_100",
-    "sugar_g_per_100",
-    "sodium_mg_per_100",
-    "saturated_fat_g_per_100",
-    "trans_fat_g_per_100",
-    "search_priority",
-  ].join(",");
+  const response = await fetch(
+    "/api/mfds-food-search?q=" + encodeURIComponent(keyword) + "&limit=" + safeLimit,
+    { headers: { Accept: "application/json" } }
+  );
+  const data = await response.json().catch(() => ({}));
 
-  const path =
-    "/external_foods?select=" + columns +
-    "&search_text_norm=ilike.*" + encodeURIComponent(normalized) + "*" +
-    "&order=search_priority.desc,display_name.asc" +
-    "&limit=" + safeLimit;
+  if (!response.ok) {
+    throw new Error(data?.error || "식약처 음식 검색에 실패했어.");
+  }
 
-  const rows = await requestSupabaseRest(path, {}, null);
-  return Array.isArray(rows) ? rows.map(toExternalFoodEntry) : [];
+  return Array.isArray(data?.results) ? data.results : [];
 }

@@ -154,15 +154,15 @@ function makeExternalFoodBasis(food, fallbackName = "") {
     source: "external_food",
     externalSource: food?.source || "external_food",
     externalFoodId: food?.externalFoodId || food?.sourceFoodCode || "",
-    externalSourceLabel: food?.sourceLabel || "외부 음식 DB",
+    externalSourceLabel: food?.sourceLabel || "식약처 식품영양성분 DB",
   };
 }
 
-function makeMyFoodFormFromExternalFood(food) {
+function makeMyFoodFormFromExternalFood(food, preferredName = "") {
   const basisFood = makeExternalFoodBasis(food);
 
   return {
-    name: basisFood.name,
+    name: cleanFoodName(preferredName || basisFood.name),
     baseAmount: "100",
     kcal: basisFood.kcal ? String(Math.round(basisFood.kcal)) : "",
     carb: basisFood.carb ? formatMacro(basisFood.carb) : "",
@@ -172,7 +172,19 @@ function makeMyFoodFormFromExternalFood(food) {
 }
 
 function getExternalFoodMetaText(food) {
-  return [food?.maker, food?.category, food?.sourceLabel || "외부 음식 DB"].filter(Boolean).join(" · ");
+  const sampleCount = toNumber(food?.sampleCount);
+  const kcalMin = toNumber(food?.kcalMin);
+  const kcalMax = toNumber(food?.kcalMax);
+  const rangeText = sampleCount > 1 && kcalMax > kcalMin
+    ? `${Math.round(kcalMin)}~${Math.round(kcalMax)}kcal 범위`
+    : "";
+
+  return [
+    food?.sourceLabel || "식약처 식품영양성분 DB",
+    rangeText,
+    food?.category,
+    food?.maker,
+  ].filter(Boolean).join(" · ");
 }
 
 export default function App() {
@@ -1395,7 +1407,7 @@ export default function App() {
       setCustomFoods((current) => mergeManagedUserFood(current, null, storedFood));
       return storedFood;
     } catch (error) {
-      console.warn("외부 음식 DB 저장 실패, 이번 항목 기준으로만 반영:", error);
+      console.warn("식약처 음식 저장 실패, 이번 항목 기준으로만 반영:", error);
       return food;
     }
   };
@@ -1935,7 +1947,7 @@ export default function App() {
         ...current,
         loading: false,
         results: [],
-        error: error?.message || "음식 DB 조회에 실패했습니다. 직접 등록해줘.",
+        error: error?.message || "식약처 조회에 실패했습니다. 직접 등록해줘.",
         searched: true,
       }));
     }
@@ -1963,7 +1975,7 @@ export default function App() {
 
   const openNutritionExternalMatchChoice = (food) => {
     if (!nutritionTarget || !food) return;
-    setNutritionForm(makeMyFoodFormFromExternalFood(food));
+    setNutritionForm(makeMyFoodFormFromExternalFood(food, nutritionTarget.name));
   };
 
   const applyExternalFoodToMyFoodForm = (food) => {
@@ -2274,7 +2286,7 @@ export default function App() {
             {!myFoodEditTarget && (
               <div className="public-food-search-panel">
                 <label>
-                  <span>음식 DB 검색</span>
+                  <span>식약처 음식 검색</span>
                   <div className="public-food-search-row">
                     <input
                       value={myFoodExternalSearch.query}
@@ -2289,6 +2301,7 @@ export default function App() {
                     </button>
                   </div>
                 </label>
+                <p className="public-food-search-hint">검색할 때만 식약처 API를 조회하고, 선택한 값은 나의 음식으로 저장됩니다.</p>
                 {myFoodExternalSearch.error && <p className="public-food-status is-error">{myFoodExternalSearch.error}</p>}
                 {myFoodExternalSearch.loading && <p className="public-food-status">검색 중...</p>}
                 {!myFoodExternalSearch.loading && myFoodExternalSearch.searched && !myFoodExternalSearch.error && myFoodExternalSearch.results.length === 0 && (
@@ -2475,7 +2488,7 @@ export default function App() {
           <form className="modal-form" onSubmit={saveNutrition}>
             <div className="public-food-search-panel">
               <label>
-                <span>음식 DB 검색</span>
+                <span>식약처 음식 검색</span>
                 <div className="public-food-search-row">
                   <input
                     value={nutritionExternalSearch.query}
@@ -2495,6 +2508,7 @@ export default function App() {
                   </button>
                 </div>
               </label>
+              <p className="public-food-search-hint">메모 입력 중에는 조회하지 않습니다. 여기서 검색·선택한 값만 나의 음식으로 저장됩니다.</p>
               {nutritionExternalSearch.error && <p className="public-food-status is-error">{nutritionExternalSearch.error}</p>}
               {nutritionExternalSearch.loading && <p className="public-food-status">검색 중...</p>}
               {!nutritionExternalSearch.loading && nutritionExternalSearch.searched && !nutritionExternalSearch.error && nutritionExternalSearch.results.length === 0 && (
