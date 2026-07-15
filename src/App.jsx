@@ -31,6 +31,7 @@ import {
 import MealCard from "./components/MealCard";
 import MyFoodsScreen from "./components/MyFoodsScreen";
 import StatsScreen from "./components/StatsScreen";
+import WorkoutScreen from "./components/WorkoutScreen";
 import { MacroLegend } from "./components/summary";
 import { Modal, ModalActions } from "./components/modals/Modal";
 import { addDays, getDateKey, isSameDate } from "./utils/date";
@@ -197,6 +198,7 @@ export default function App() {
   const [authLoading, setAuthLoading] = useState(false);
   const [setupScreen, setSetupScreen] = useState("setup");
   const [activeTab, setActiveTab] = useState("record");
+  const [recordMode, setRecordMode] = useState("diet");
   const [selectedDate, setSelectedDate] = useState(() => new Date());
   const dateSwipeStartRef = useRef(null);
   const [dateSwipeOffset, setDateSwipeOffset] = useState(0);
@@ -412,6 +414,17 @@ export default function App() {
         [selectedDateKey]: nextMeals,
       };
     });
+  };
+
+  const workout = dailyRecords[selectedDateKey]?.workout || { memo: "", selections: {}, targets: [], increment: 5, completed: false };
+  const updateWorkout = (nextWorkout) => {
+    setDailyRecords((current) => ({
+      ...current,
+      [selectedDateKey]: {
+        ...current[selectedDateKey],
+        workout: nextWorkout,
+      },
+    }));
   };
 
   useEffect(() => {
@@ -2075,10 +2088,18 @@ export default function App() {
             </button>
           </div>
         </div>
+        {activeTab === "record" && (
+          <div className="record-mode-tabs" role="tablist" aria-label="기록 종류">
+            <button className={recordMode === "diet" ? "is-active" : ""} type="button" onClick={() => setRecordMode("diet")}>식단</button>
+            <button className={recordMode === "workout" ? "is-active" : ""} type="button" onClick={() => setRecordMode("workout")}>운동</button>
+          </div>
+        )}
         {!isViewingToday && <p className="date-helper-text">선택한 날짜의 기록을 확인 중이야.</p>}
         {foodDbLoading && <p className="date-helper-text">음식 DB 불러오는 중...</p>}
         {foodDbError && <p className="form-error">{foodDbError}</p>}
 
+        {(activeTab !== "record" || recordMode === "diet") && (
+        <>
         <div className="summary-grid">
           <SummaryItem label="목표" value={calorieGoal + " kcal"} />
           <SummaryItem label="섭취" value={Math.round(totals.kcal) + " kcal"} />
@@ -2100,10 +2121,12 @@ export default function App() {
             <MacroBar label="지방" macro="fat" value={totals.fat} target={macroTargets.fat} profile={activePlan.profile} />
           </div>
         </div>
+        </>
+        )}
         </section>
       )}
 
-      {activeTab === "record" && (
+      {activeTab === "record" && recordMode === "diet" && (
         <>
       <MorningWeightCard
         value={morningWeight}
@@ -2248,6 +2271,10 @@ export default function App() {
         </>
       )}
 
+      {activeTab === "record" && recordMode === "workout" && (
+        <WorkoutScreen workout={workout} onChange={updateWorkout} />
+      )}
+
       {activeTab === "stats" && (
         <StatsScreen stats={stats} plan={activePlan} totals={totals} />
       )}
@@ -2267,7 +2294,7 @@ export default function App() {
       )}
 
       <div className="app-footer-actions">
-        {activeTab === "record" && (
+        {activeTab === "record" && recordMode === "diet" && (
           <button
             className={dayComplete ? "finish-day-button is-complete" : "finish-day-button"}
             type="button"
