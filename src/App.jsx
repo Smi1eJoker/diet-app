@@ -2312,14 +2312,21 @@ export default function App() {
                     {myFoodExternalSearch.results.map((food) => {
                       const basisFood = makeExternalFoodBasis(food);
                       return (
-                        <button key={food.id || food.sourceFoodCode || food.name} type="button" onClick={() => applyExternalFoodToMyFoodForm(food)}>
-                          <strong>{basisFood.name}</strong>
-                          <em>100g</em>
-                          <span>
+                        <button
+                          key={food.id || food.sourceFoodCode || food.name}
+                          type="button"
+                          className="public-food-candidate-card"
+                          onClick={() => applyExternalFoodToMyFoodForm(food)}
+                        >
+                          <strong className="public-food-candidate-name">{basisFood.name}</strong>
+                          <em className="public-food-candidate-amount">100g</em>
+                          <span className="public-food-candidate-nutrition">
                             <b>{Math.round(basisFood.kcal)}kcal</b>
-                            <small>C {formatMacro(basisFood.carb)}g P {formatMacro(basisFood.protein)}g F {formatMacro(basisFood.fat)}g</small>
-                            {getExternalFoodMetaText(food) && <small>{getExternalFoodMetaText(food)}</small>}
+                            <small>Carb {formatMacro(basisFood.carb)}g · Pro {formatMacro(basisFood.protein)}g · Fat {formatMacro(basisFood.fat)}g</small>
                           </span>
+                          {getExternalFoodMetaText(food) && (
+                            <small className="public-food-candidate-source">{getExternalFoodMetaText(food)}</small>
+                          )}
                         </button>
                       );
                     })}
@@ -2519,14 +2526,21 @@ export default function App() {
                   {nutritionExternalSearch.results.map((food) => {
                     const basisFood = makeExternalFoodBasis(food, nutritionTarget.name);
                     return (
-                      <button key={food.id || food.sourceFoodCode || food.name} type="button" onClick={() => openNutritionExternalMatchChoice(food)}>
-                        <strong>{basisFood.name}</strong>
-                        <em>100g</em>
-                        <span>
+                      <button
+                        key={food.id || food.sourceFoodCode || food.name}
+                        type="button"
+                        className="public-food-candidate-card"
+                        onClick={() => openNutritionExternalMatchChoice(food)}
+                      >
+                        <strong className="public-food-candidate-name">{basisFood.name}</strong>
+                        <em className="public-food-candidate-amount">100g</em>
+                        <span className="public-food-candidate-nutrition">
                           <b>{Math.round(basisFood.kcal)}kcal</b>
-                          <small>C {formatMacro(basisFood.carb)}g P {formatMacro(basisFood.protein)}g F {formatMacro(basisFood.fat)}g</small>
-                          {getExternalFoodMetaText(food) && <small>{getExternalFoodMetaText(food)}</small>}
+                          <small>Carb {formatMacro(basisFood.carb)}g · Pro {formatMacro(basisFood.protein)}g · Fat {formatMacro(basisFood.fat)}g</small>
                         </span>
+                        {getExternalFoodMetaText(food) && (
+                          <small className="public-food-candidate-source">{getExternalFoodMetaText(food)}</small>
+                        )}
                       </button>
                     );
                   })}
