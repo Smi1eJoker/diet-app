@@ -4575,3 +4575,59 @@ textarea,
   font-weight: 700;
   line-height: 1.45;
 }
+
+/* v21: MFDS result cards — top aligned and fully readable */
+.public-food-candidate-list button {
+  height: auto;
+  min-height: 0;
+  grid-template-columns: minmax(0, 1fr) 48px minmax(132px, 1.35fr);
+  align-items: start;
+  column-gap: 10px;
+  row-gap: 0;
+  padding: 11px 12px;
+  overflow: visible;
+}
+
+.public-food-candidate-list button strong,
+.public-food-candidate-list button em,
+.public-food-candidate-list button span {
+  align-self: start;
+}
+
+.public-food-candidate-list button strong {
+  padding-top: 1px;
+  white-space: normal;
+  word-break: keep-all;
+  overflow-wrap: anywhere;
+}
+
+.public-food-candidate-list button em {
+  padding-top: 2px;
+}
+
+.public-food-candidate-list button span {
+  gap: 4px;
+  line-height: 1.3;
+  overflow: visible;
+}
+
+.public-food-candidate-list button span b,
+.public-food-candidate-list button span small {
+  white-space: normal;
+  word-break: keep-all;
+  overflow-wrap: anywhere;
+  overflow: visible;
+  text-overflow: clip;
+}
+
+.public-food-candidate-list button span small:last-child:not(:first-child) {
+  line-height: 1.35;
+}
+
+@media (max-width: 380px) {
+  .public-food-candidate-list button {
+    grid-template-columns: minmax(0, 1fr) 42px minmax(118px, 1.25fr);
+    column-gap: 8px;
+    padding: 10px;
+  }
+}
