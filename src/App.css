@@ -5014,16 +5014,6 @@ textarea,
   border-color: #666;
 }
 
-<<<<<<< HEAD
-=======
-.workout-bodypart-card.is-complete .workout-bodypart-input:disabled {
-  border-color: #303030;
-  background: #181818;
-  color: #f2f2f2;
-  opacity: 1;
-}
-
->>>>>>> 3e0b93e (update app)
 .workout-autocomplete-list {
   position: relative;
   z-index: 5;
@@ -5098,35 +5088,6 @@ textarea,
 
 .workout-memo-actions {
   margin-top: 12px;
-<<<<<<< HEAD
-=======
-  display: block;
-}
-
-.workout-complete-button {
-  width: 100%;
-  min-height: 44px;
-  padding: 0 18px;
-  border: 1px solid #f5f5f5;
-  border-radius: 999px;
-  background: #f5f5f5;
-  color: #050505;
-  font-size: 14px;
-  font-weight: 900;
-}
-
-.workout-complete-button.is-complete {
-  border-color: #66e36f;
-  background: #66e36f;
-  color: #050505;
-}
-
-.workout-complete-button:disabled {
-  border-color: #262626;
-  background: #181818;
-  color: #666666;
-  cursor: default;
->>>>>>> 3e0b93e (update app)
 }
 
 @media (max-width: 380px) {
