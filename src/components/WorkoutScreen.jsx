@@ -9,7 +9,8 @@ const PURPOSES = {
 };
 
 const EQUIPMENT_OPTIONS = [
-  { value: "free", label: "프리" },
+  { value: "barbell", label: "바벨" },
+  { value: "dumbbell", label: "덤벨" },
   { value: "machine", label: "머신" },
   { value: "cable", label: "케이블" },
 ];
@@ -50,8 +51,10 @@ function inferPurpose(reps) {
 }
 
 function formatSet(set) {
-  const weight = set.weight > 0 ? `${set.weight}kg × ` : "";
-  return `${weight}${set.reps}회 × ${set.sets}세트`;
+  const weightText = set.weightText ?? (set.weight !== 0 ? String(set.weight) : "");
+  const repsText = set.repsText ?? String(set.reps);
+  const weight = weightText ? `${weightText}kg × ` : "";
+  return `${weight}${repsText}회 × ${set.sets}세트`;
 }
 
 function getNextTarget(set, purposeKey) {
@@ -61,7 +64,9 @@ function getNextTarget(set, purposeKey) {
   }
   return {
     ...set,
-    weight: set.weight > 0 ? set.weight + DEFAULT_WEIGHT_INCREMENT : set.weight,
+    weight: set.weight !== 0 ? set.weight + DEFAULT_WEIGHT_INCREMENT : set.weight,
+    weightText: undefined,
+    repsText: undefined,
     reps: purpose.min,
   };
 }
@@ -221,8 +226,8 @@ export default function WorkoutScreen({ workout, onChange, history = {} }) {
       next[exercise.id] = {
         name: exercise.name,
         equipment: equipmentByExercise[normalizeHistoryKey(exercise.name)] || history.equipmentByExercise?.[normalizeHistoryKey(exercise.name)] || "",
-        selectedSetIds: exercise.sets.map((set) => set.id),
-        purposes: Object.fromEntries(exercise.sets.map((set) => [set.id, inferPurpose(set.reps)])),
+        selectedSetIds: [],
+        purposes: {},
       };
     }
     updateWorkout({ selections: next });

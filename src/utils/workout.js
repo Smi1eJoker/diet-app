@@ -1,27 +1,86 @@
 export function normalizeWorkoutLine(value) {
-  return String(value || "").replace(/[×＊*']/g, "x").replace(/\s+/g, " ").trim();
+  return String(value || "")
+    .replace(/[×＊*']/g, "x")
+    .replace(/\s*\+\s*/g, "+")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+const NUMBER_TOKEN = "[+-]?\\d+(?:\\.\\d+)?";
+const COMPOUND_NUMBER_TOKEN = `${NUMBER_TOKEN}(?:\\+${NUMBER_TOKEN})*`;
+
+function parseCompoundNumber(value) {
+  const parts = String(value || "")
+    .split("+")
+    .map((part) => Number(part))
+    .filter((part) => Number.isFinite(part));
+
+  return {
+    values: parts,
+    primary: parts[0] ?? 0,
+    text: String(value || ""),
+  };
 }
 
 export function parseWorkoutSetText(text) {
   const line = normalizeWorkoutLine(text);
-  const match = line.match(/^(?:(\d+(?:\.\d+)?)\s*(?:kg)?\s*x\s*)?(\d+)\s*(?:회)?(?:\s*x\s*(\d+)\s*(?:세트)?)?$/i);
-  if (!match) return null;
+  const fullPattern = new RegExp(
+    `^(${COMPOUND_NUMBER_TOKEN})\\s*(?:kg)?\\s*x\\s*(${COMPOUND_NUMBER_TOKEN})\\s*(?:회)?(?:\\s*x\\s*(\\d+)\\s*(?:세트)?)?$`,
+    "i",
+  );
+  const repsOnlyPattern = new RegExp(`^(${COMPOUND_NUMBER_TOKEN})\\s*(?:회)?$`, "i");
+
+  const fullMatch = line.match(fullPattern);
+  if (fullMatch) {
+    const weight = parseCompoundNumber(fullMatch[1]);
+    const reps = parseCompoundNumber(fullMatch[2]);
+    return {
+      weight: weight.primary,
+      weightValues: weight.values,
+      weightText: weight.text,
+      reps: reps.primary,
+      repsValues: reps.values,
+      repsText: reps.text,
+      sets: fullMatch[3] ? Number(fullMatch[3]) : 1,
+      raw: text.trim(),
+    };
+  }
+
+  const repsOnlyMatch = line.match(repsOnlyPattern);
+  if (!repsOnlyMatch) return null;
+  const reps = parseCompoundNumber(repsOnlyMatch[1]);
   return {
-    weight: match[1] ? Number(match[1]) : 0,
-    reps: Number(match[2]),
-    sets: match[3] ? Number(match[3]) : 1,
+    weight: 0,
+    weightValues: [],
+    weightText: "",
+    reps: reps.primary,
+    repsValues: reps.values,
+    repsText: reps.text,
+    sets: 1,
     raw: text.trim(),
   };
 }
 
 export function parseInlineWorkoutExercise(line) {
-  const match = normalizeWorkoutLine(line).match(/^(.+?)\s+(?:(\d+(?:\.\d+)?)\s*(?:kg)?\s*x\s*)?(\d+)\s*(?:회)?(?:\s*x\s*(\d+)\s*(?:세트)?)?$/i);
+  const normalized = normalizeWorkoutLine(line);
+  const pattern = new RegExp(
+    `^(.+?)\\s+(${COMPOUND_NUMBER_TOKEN})\\s*(?:kg)?\\s*x\\s*(${COMPOUND_NUMBER_TOKEN})\\s*(?:회)?(?:\\s*x\\s*(\\d+)\\s*(?:세트)?)?$`,
+    "i",
+  );
+  const match = normalized.match(pattern);
   if (!match || !/[가-힣a-zA-Z]/.test(match[1])) return null;
+
+  const weight = parseCompoundNumber(match[2]);
+  const reps = parseCompoundNumber(match[3]);
   return {
     name: match[1].trim(),
     set: {
-      weight: match[2] ? Number(match[2]) : 0,
-      reps: Number(match[3]),
+      weight: weight.primary,
+      weightValues: weight.values,
+      weightText: weight.text,
+      reps: reps.primary,
+      repsValues: reps.values,
+      repsText: reps.text,
       sets: match[4] ? Number(match[4]) : 1,
       raw: line.trim(),
     },
