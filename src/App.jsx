@@ -266,6 +266,7 @@ export default function App() {
   const [mealsByDate, setMealsByDate] = useState({});
   const [morningWeight, setMorningWeight] = useState("");
   const [morningWeightInput, setMorningWeightInput] = useState("");
+  const [extraCaloriesInput, setExtraCaloriesInput] = useState("");
   const [customFoods, setCustomFoods] = useState({});
   const [foodDbLoading, setFoodDbLoading] = useState(false);
   const [foodDbError, setFoodDbError] = useState("");
@@ -505,6 +506,7 @@ export default function App() {
   useEffect(() => {
     const record = dailyRecords[selectedDateKey] || {};
     setMorningWeight(record.morningWeight ? String(record.morningWeight) : "");
+    setExtraCaloriesInput(record.extraCalories ? String(record.extraCalories) : "");
     setDayComplete(Boolean(record.dayComplete));
   }, [selectedDateKey, dailyRecords]);
 
@@ -581,6 +583,7 @@ export default function App() {
     setDailyRecords({});
     setMorningWeight("");
     setMorningWeightInput("");
+    setExtraCaloriesInput("");
     setProfile(DEFAULT_PROFILE);
     setNutritionPlan(buildNutritionPlan(DEFAULT_PROFILE));
   };
@@ -596,6 +599,7 @@ export default function App() {
       const nextRecord = dailyRecords[getDateKey(nextDate)] || {};
       setMorningWeight(nextRecord.morningWeight ? String(nextRecord.morningWeight) : "");
       setMorningWeightInput("");
+      setExtraCaloriesInput(nextRecord.extraCalories ? String(nextRecord.extraCalories) : "");
       setDayComplete(Boolean(nextRecord.dayComplete));
       return nextDate;
     });
@@ -608,6 +612,7 @@ export default function App() {
     setSelectedDate(date);
     setMorningWeight(nextRecord.morningWeight ? String(nextRecord.morningWeight) : "");
     setMorningWeightInput("");
+    setExtraCaloriesInput(nextRecord.extraCalories ? String(nextRecord.extraCalories) : "");
     setDayComplete(Boolean(nextRecord.dayComplete));
     setIsAddingMeal(false);
     setEditingMealId(null);
@@ -723,6 +728,21 @@ export default function App() {
     setMorningWeightInput("");
   };
 
+  const registerExtraCalories = () => {
+    if (dayComplete) return;
+    if (String(extraCaloriesInput).trim() === "") return;
+    const nextCalories = Math.max(0, Math.round(toNumber(extraCaloriesInput)));
+
+    setDailyRecords((current) => ({
+      ...current,
+      [selectedDateKey]: {
+        ...current[selectedDateKey],
+        extraCalories: nextCalories,
+      },
+    }));
+    setExtraCaloriesInput(String(nextCalories));
+  };
+
   const editMorningWeight = () => {
     setActionTarget(null);
     setMorningWeightInput(morningWeight);
@@ -780,7 +800,12 @@ export default function App() {
   };
 
   const sortedMeals = useMemo(() => sortMealsLatestFirst(meals), [meals]);
-  const totals = useMemo(() => calculateTotals(meals), [meals]);
+  const foodTotals = useMemo(() => calculateTotals(meals), [meals]);
+  const extraCalories = Math.max(0, toNumber(dailyRecords[selectedDateKey]?.extraCalories));
+  const totals = useMemo(() => ({
+    ...foodTotals,
+    kcal: foodTotals.kcal + extraCalories,
+  }), [foodTotals, extraCalories]);
   const stats = useMemo(() => buildStats(meals, activePlan, morningWeight, dailyRecords, selectedDate), [meals, activePlan, morningWeight, dailyRecords, selectedDate]);
   const managedUserFoods = useMemo(() => getManagedUserFoods(customFoods), [customFoods]);
   const managedUserAliases = useMemo(() => getManagedUserAliases(customFoods), [customFoods]);
@@ -2281,6 +2306,34 @@ export default function App() {
           )}
 
           {formError && <p className="form-error">{formError}</p>}
+
+          <div className="extra-calorie-register" aria-label="추가 칼로리 등록">
+            <div className="extra-calorie-copy">
+              <strong>추가 칼로리</strong>
+              <span>간식·음료처럼 따로 기록하기 어려운 섭취량</span>
+            </div>
+            <div className="extra-calorie-controls">
+              <input
+                type="number"
+                min="0"
+                step="1"
+                inputMode="numeric"
+                value={extraCaloriesInput}
+                onChange={(event) => setExtraCaloriesInput(event.target.value)}
+                placeholder="0"
+                disabled={dayComplete}
+                aria-label="추가 칼로리"
+              />
+              <span>kcal</span>
+              <button
+                type="button"
+                onClick={registerExtraCalories}
+                disabled={dayComplete || String(extraCaloriesInput).trim() === ""}
+              >
+                {extraCalories > 0 ? "수정" : "등록"}
+              </button>
+            </div>
+          </div>
 
           <div className="daily-memo-actions">
             <button
