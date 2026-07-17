@@ -15,6 +15,8 @@ const EQUIPMENT_OPTIONS = [
   { value: "cable", label: "케이블" },
 ];
 
+const BODY_PART_OPTIONS = ["가슴", "어깨", "등", "하체", "팔"];
+
 const DEFAULT_WEIGHT_INCREMENT = 5;
 
 function normalizeHistoryKey(value) {
@@ -151,7 +153,6 @@ function buildCompletedMemoRows(memo, parsed, selections) {
 }
 
 export default function WorkoutScreen({ workout, onChange, history = {} }) {
-  const [bodyPartFocused, setBodyPartFocused] = useState(false);
   const [memoFocused, setMemoFocused] = useState(false);
   const [memoCursor, setMemoCursor] = useState(0);
   const memoRef = useRef(null);
@@ -163,12 +164,15 @@ export default function WorkoutScreen({ workout, onChange, history = {} }) {
     () => workout?.equipmentByExercise || {},
     [workout?.equipmentByExercise],
   );
-  const bodyPart = workout?.bodyPart || "";
+  const bodyParts = Array.isArray(workout?.bodyParts)
+    ? workout.bodyParts
+    : String(workout?.bodyPart || "").split(",").map((item) => item.trim()).filter(Boolean);
 
   const updateWorkout = (patch) => {
     const nextWorkout = {
       memo: "",
       bodyPart: "",
+      bodyParts: [],
       completed: false,
       selecting: false,
       selections: {},
@@ -187,11 +191,6 @@ export default function WorkoutScreen({ workout, onChange, history = {} }) {
   };
 
   const completedLongPressProps = useLongPress(editCompletedWorkout);
-
-  const bodyPartSuggestions = useMemo(
-    () => (bodyPartFocused ? findMatchingHistory(history.bodyParts || [], bodyPart) : []),
-    [bodyPartFocused, bodyPart, history.bodyParts],
-  );
 
   const memoLineInfo = useMemo(
     () => getCurrentLineInfo(workout?.memo || "", memoCursor),
@@ -214,7 +213,7 @@ export default function WorkoutScreen({ workout, onChange, history = {} }) {
 
   const startSelection = () => {
     if (parsed.length === 0) return;
-    updateWorkout({ bodyPart: bodyPart.trim(), selecting: true, completed: false });
+    updateWorkout({ bodyParts, bodyPart: bodyParts.join(", "), selecting: true, completed: false });
   };
 
   const toggleExercise = (exercise) => {
@@ -228,6 +227,7 @@ export default function WorkoutScreen({ workout, onChange, history = {} }) {
         equipment: equipmentByExercise[normalizeHistoryKey(exercise.name)] || history.equipmentByExercise?.[normalizeHistoryKey(exercise.name)] || "",
         selectedSetIds: [],
         purposes: {},
+        bodyPart: bodyParts[0] || "",
       };
     }
     updateWorkout({ selections: next });
@@ -239,6 +239,7 @@ export default function WorkoutScreen({ workout, onChange, history = {} }) {
       equipment: equipmentByExercise[normalizeHistoryKey(exercise.name)] || history.equipmentByExercise?.[normalizeHistoryKey(exercise.name)] || "",
       selectedSetIds: [],
       purposes: {},
+      bodyPart: bodyParts[0] || "",
     };
     const selected = current.selectedSetIds.includes(set.id);
     const selectedSetIds = selected
@@ -260,6 +261,28 @@ export default function WorkoutScreen({ workout, onChange, history = {} }) {
     updateWorkout({ selections: next });
   };
 
+
+  const toggleBodyPart = (part) => {
+    const next = bodyParts.includes(part)
+      ? bodyParts.filter((item) => item !== part)
+      : [...bodyParts, part];
+    updateWorkout({ bodyParts: next, bodyPart: next.join(", "), completed: false });
+  };
+
+  const changeExerciseBodyPart = (exercise, part) => {
+    const current = selections[exercise.id] || {
+      name: exercise.name,
+      equipment: equipmentByExercise[normalizeHistoryKey(exercise.name)] || "",
+      selectedSetIds: [],
+      purposes: {},
+    };
+    updateWorkout({
+      selections: {
+        ...selections,
+        [exercise.id]: { ...current, bodyPart: part },
+      },
+    });
+  };
   const changePurpose = (exerciseId, setId, purpose) => {
     const current = selections[exerciseId];
     if (!current) return;
@@ -305,13 +328,14 @@ export default function WorkoutScreen({ workout, onChange, history = {} }) {
         targets.push({
           exerciseName: exercise.name,
           equipment: equipmentByExercise[normalizeHistoryKey(exercise.name)] || selected.equipment || history.equipmentByExercise?.[normalizeHistoryKey(exercise.name)] || "",
+          bodyPart: selected.bodyPart || bodyParts[0] || "",
           source: set,
           purpose,
           next: getNextTarget(set, purpose),
         });
       });
     });
-    updateWorkout({ bodyPart: bodyPart.trim(), completed: true, selecting: false, targets });
+    updateWorkout({ bodyParts, bodyPart: bodyParts.join(", "), completed: true, selecting: false, targets });
   };
 
   const selectedSetCount = Object.values(selections).reduce((sum, item) => {
@@ -401,40 +425,22 @@ export default function WorkoutScreen({ workout, onChange, history = {} }) {
     <div className="workout-screen">
       {!selecting && (
         <section
-          className={`workout-bodypart-card${workout?.completed ? " is-complete" : ""}`}
+          className={`workout-bodypart-card workout-bodypart-choice-card${workout?.completed ? " is-complete" : ""}`}
           {...(workout?.completed ? completedLongPressProps : {})}
         >
-          <label className="workout-bodypart-label" htmlFor="workout-bodypart-input">운동 부위</label>
-          <div className="workout-autocomplete-wrap">
-            <input
-              id="workout-bodypart-input"
-              className="workout-bodypart-input"
-              type="text"
-              value={bodyPart}
-              onChange={(event) => updateWorkout({ bodyPart: event.target.value, completed: false })}
-              onFocus={() => setBodyPartFocused(true)}
-              onBlur={() => window.setTimeout(() => setBodyPartFocused(false), 120)}
-              placeholder="예: 가슴, 등, 어깨"
-              autoComplete="off"
-              disabled={workout?.completed}
-            />
-            {bodyPartSuggestions.length > 0 && (
-              <div className="workout-autocomplete-list" role="listbox" aria-label="운동 부위 이전 기록">
-                {bodyPartSuggestions.map((suggestion) => (
-                  <button
-                    key={suggestion}
-                    type="button"
-                    onMouseDown={(event) => event.preventDefault()}
-                    onClick={() => {
-                      updateWorkout({ bodyPart: suggestion, completed: false });
-                      setBodyPartFocused(false);
-                    }}
-                  >
-                    {suggestion}
-                  </button>
-                ))}
-              </div>
-            )}
+          <span className="workout-bodypart-label">운동 부위</span>
+          <div className="workout-bodypart-options" role="group" aria-label="운동 부위 선택">
+            {BODY_PART_OPTIONS.map((part) => (
+              <button
+                key={part}
+                className={bodyParts.includes(part) ? "is-selected" : ""}
+                type="button"
+                onClick={() => toggleBodyPart(part)}
+                disabled={workout?.completed}
+              >
+                {part}
+              </button>
+            ))}
           </div>
         </section>
       )}
@@ -496,6 +502,7 @@ export default function WorkoutScreen({ workout, onChange, history = {} }) {
                       />
                       <strong>{exercise.name}</strong>
                     </label>
+                    <div className="workout-exercise-classifiers">
                     <select
                       className="workout-equipment-select"
                       value={equipmentValue}
@@ -507,6 +514,16 @@ export default function WorkoutScreen({ workout, onChange, history = {} }) {
                         <option key={option.value} value={option.value}>{option.label}</option>
                       ))}
                     </select>
+                    <select
+                      className="workout-bodypart-select"
+                      value={exerciseSelection?.bodyPart || ""}
+                      onChange={(event) => changeExerciseBodyPart(exercise, event.target.value)}
+                      aria-label={`${exercise.name} 운동 부위`}
+                    >
+                      <option value="">부위</option>
+                      {BODY_PART_OPTIONS.map((part) => <option key={part} value={part}>{part}</option>)}
+                    </select>
+                    </div>
                   </div>
 
                   {exercise.sets.map((set) => {
@@ -586,7 +603,7 @@ export default function WorkoutScreen({ workout, onChange, history = {} }) {
       {selecting && (
         <div className="workout-selected-summary">
           선택한 성장 관리 세트
-          <strong>{bodyPart.trim() || "부위 미선택"}{selectedSetCount > 0 ? ` · ${selectedSetCount}세트` : ""}</strong>
+          <strong>{bodyParts.join(" · ") || "부위 미선택"}{selectedSetCount > 0 ? ` · ${selectedSetCount}세트` : ""}</strong>
         </div>
       )}
 

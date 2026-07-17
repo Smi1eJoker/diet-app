@@ -32,6 +32,7 @@ import MealCard from "./components/MealCard";
 import MyFoodsScreen from "./components/MyFoodsScreen";
 import StatsScreen from "./components/StatsScreen";
 import WorkoutScreen from "./components/WorkoutScreen";
+import MyWorkoutsScreen from "./components/MyWorkoutsScreen";
 import { MacroLegend } from "./components/summary";
 import { Modal, ModalActions } from "./components/modals/Modal";
 import { addDays, getDateKey, isSameDate } from "./utils/date";
@@ -2390,6 +2391,10 @@ export default function App() {
         <StatsScreen stats={stats} plan={activePlan} totals={totals} />
       )}
 
+      {activeTab === "workouts" && (
+        <MyWorkoutsScreen dailyRecords={dailyRecords} />
+      )}
+
       {activeTab === "foods" && (
         <MyFoodsScreen
           foods={managedUserFoods}
@@ -3014,6 +3019,10 @@ function BottomNav({ activeTab, onChange }) {
       <button className={activeTab === "stats" ? "is-active" : ""} type="button" onClick={() => onChange("stats")}>
         <span>▥</span>
         통계
+      </button>
+      <button className={activeTab === "workouts" ? "is-active" : ""} type="button" onClick={() => onChange("workouts")}>
+        <span>▧</span>
+        나의 운동
       </button>
       <button className={activeTab === "foods" ? "is-active" : ""} type="button" onClick={() => onChange("foods")}>
         <span>▦</span>
