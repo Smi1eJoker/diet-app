@@ -1,4 +1,5 @@
 import { useMemo, useRef, useState } from "react";
+import useLongPress from "../hooks/useLongPress";
 import { normalizeWorkoutLine, parseInlineWorkoutExercise, parseWorkoutMemo, parseWorkoutSetText } from "../utils/workout";
 
 const PURPOSES = {
@@ -97,57 +98,49 @@ function getCurrentLineInfo(value, cursorPosition) {
   };
 }
 
-export default function WorkoutScreen({ workout, onChange, history = {} }) {
-  const [bodyPartFocused, setBodyPartFocused] = useState(false);
-  const [memoFocused, setMemoFocused] = useState(false);
-  const [memoCursor, setMemoCursor] = useState(0);
-  const memoRef = useRef(null);
+function buildCompletedMemoRows(memo, parsed, selections) {
+  const rows = [];
+  let sourceExerciseIndex = -1;
+  let currentExercise = null;
+  let setIndex = 0;
 
-  const selecting = Boolean(workout?.selecting);
-  const parsed = useMemo(() => parseWorkoutMemo(workout?.memo), [workout?.memo]);
-  const selections = workout?.selections || {};
-  const equipmentByExercise = workout?.equipmentByExercise || {};
-  const bodyPart = workout?.bodyPart || "";
+  String(memo || "").split(/\r?\n/).forEach((sourceLine, lineIndex) => {
+    const line = sourceLine.trim();
 
-  const updateWorkout = (patch) => {
-    const nextWorkout = {
-      memo: "",
-      bodyPart: "",
-      completed: false,
-      selecting: false,
-      selections: {},
-      equipmentByExercise: {},
-      targets: [],
-      ...workout,
-      ...patch,
-    };
-    delete nextWorkout.increment;
-    onChange(nextWorkout);
-  };
+    if (!line) {
+      rows.push({ key: `blank-${lineIndex}`, text: "", selected: false });
+      return;
+    }
 
-  const bodyPartSuggestions = useMemo(
-    () => (bodyPartFocused ? findMatchingHistory(history.bodyParts || [], bodyPart) : []),
-    [bodyPartFocused, bodyPart, history.bodyParts],
-  );
+    const parsedSet = parseWorkoutSetText(line);
+    if (parsedSet && currentExercise) {
+      const set = currentExercise.sets[setIndex];
+      const selected = Boolean(set && selections[currentExercise.id]?.selectedSetIds?.includes(set.id));
+      rows.push({ key: `set-${lineIndex}`, text: sourceLine, selected });
+      setIndex += 1;
+      return;
+    }
 
-  const memoLineInfo = useMemo(
-    () => getCurrentLineInfo(workout?.memo || "", memoCursor),
-    [workout?.memo, memoCursor],
-  );
+    const inline = parseInlineWorkoutExercise(line);
+    sourceExerciseIndex += 1;
+    const exerciseName = inline?.name || line;
+    const exerciseId = `exercise-${sourceExerciseIndex}-${exerciseName}`;
+    currentExercise = parsed.find((exercise) => exercise.id === exerciseId) || null;
+    setIndex = inline ? 1 : 0;
 
-  const exerciseSuggestionPool = useMemo(
-    () => uniqueHistoryItems([...(history.exerciseNames || []), ...extractMemoExerciseNames(workout?.memo)]),
-    [history.exerciseNames, workout?.memo],
-  );
-
-  const exerciseSuggestions = useMemo(() => {
-    if (!memoFocused || selecting) return [];
-    const query = memoLineInfo.query;
-    if (!query || /\d/.test(query) || /(?:^|\s)x(?:\s|$)/i.test(query)) return [];
-    return findMatchingHistory(exerciseSuggestionPool, query).filter(
-      (name) => normalizeHistoryKey(name) !== normalizeHistoryKey(query),
+    const exerciseSelected = Boolean(currentExercise && selections[currentExercise.id]);
+    const inlineSetSelected = Boolean(
+      inline
+      && currentExercise?.sets?.[0]
+      && selections[currentExercise.id]?.selectedSetIds?.includes(currentExercise.sets[0].id),
     );
-  }, [memoFocused, selecting, memoLineInfo.query, exerciseSuggestionPool]);
+
+    rows.push({
+      key: `exercise-${lineIndex}`,
+      text: sourceLine,
+      selected: inline ? inlineSetSelected : exerciseSelected,
+    });
+  });
 
   return rows;
 }
@@ -159,10 +152,7 @@ export default function WorkoutScreen({ workout, onChange, history = {} }) {
   const memoRef = useRef(null);
 
   const parsed = useMemo(() => parseWorkoutMemo(workout?.memo), [workout?.memo]);
-
-  const selecting = Boolean(
-    workout?.selecting && parsed.length > 0
-  );
+  const selecting = Boolean(workout?.selecting && parsed.length > 0);
   const selections = useMemo(() => workout?.selections || {}, [workout?.selections]);
   const equipmentByExercise = useMemo(
     () => workout?.equipmentByExercise || {},
@@ -327,13 +317,18 @@ export default function WorkoutScreen({ workout, onChange, history = {} }) {
       .reduce((setSum, set) => setSum + set.sets, 0);
   }, 0);
 
+  const completedMemoRows = useMemo(
+    () => buildCompletedMemoRows(workout?.memo, parsed, selections),
+    [workout?.memo, parsed, selections],
+  );
+
   const handleMemoChange = (event) => {
     setMemoCursor(event.target.selectionStart || 0);
-
     updateWorkout({
       memo: event.target.value,
       selecting: false,
       completed: false,
+      selections: {},
       targets: [],
     });
   };
@@ -361,7 +356,13 @@ export default function WorkoutScreen({ workout, onChange, history = {} }) {
     const inserted = " x ";
     const nextValue = `${value.slice(0, selectionStart)}${inserted}${value.slice(selectionEnd)}`;
     const nextCursor = selectionStart + inserted.length;
-    updateWorkout({ memo: nextValue, completed: false, targets: [] });
+    updateWorkout({
+      memo: nextValue,
+      selecting: false,
+      completed: false,
+      selections: {},
+      targets: [],
+    });
     setMemoCursor(nextCursor);
 
     window.requestAnimationFrame(() => {
@@ -375,7 +376,13 @@ export default function WorkoutScreen({ workout, onChange, history = {} }) {
     const { lineStart, lineEnd } = getCurrentLineInfo(value, memoCursor);
     const nextValue = `${value.slice(0, lineStart)}${exerciseName}${value.slice(lineEnd)}`;
     const nextCursor = lineStart + exerciseName.length;
-    updateWorkout({ memo: nextValue, completed: false, targets: [] });
+    updateWorkout({
+      memo: nextValue,
+      selecting: false,
+      completed: false,
+      selections: {},
+      targets: [],
+    });
     setMemoCursor(nextCursor);
     setMemoFocused(true);
 
@@ -385,22 +392,13 @@ export default function WorkoutScreen({ workout, onChange, history = {} }) {
     });
   };
 
-  const clearWorkout = () => {
-    updateWorkout({
-      memo: "",
-      bodyPart: "",
-      selections: {},
-      equipmentByExercise: {},
-      targets: [],
-      completed: false,
-      selecting: false,
-    });
-  };
-
   return (
     <div className="workout-screen">
       {!selecting && (
-        <section className="workout-bodypart-card">
+        <section
+          className={`workout-bodypart-card${workout?.completed ? " is-complete" : ""}`}
+          {...(workout?.completed ? completedLongPressProps : {})}
+        >
           <label className="workout-bodypart-label" htmlFor="workout-bodypart-input">운동 부위</label>
           <div className="workout-autocomplete-wrap">
             <input
@@ -413,6 +411,7 @@ export default function WorkoutScreen({ workout, onChange, history = {} }) {
               onBlur={() => window.setTimeout(() => setBodyPartFocused(false), 120)}
               placeholder="예: 가슴, 등, 어깨"
               autoComplete="off"
+              disabled={workout?.completed}
             />
             {bodyPartSuggestions.length > 0 && (
               <div className="workout-autocomplete-list" role="listbox" aria-label="운동 부위 이전 기록">
@@ -441,7 +440,7 @@ export default function WorkoutScreen({ workout, onChange, history = {} }) {
           {workout?.completed && <span className="workout-saved-badge">저장됨</span>}
         </div>
 
-        {!selecting ? (
+        {!selecting && !workout?.completed ? (
           <div className="workout-memo-input-wrap">
             <textarea
               ref={memoRef}
@@ -475,7 +474,7 @@ export default function WorkoutScreen({ workout, onChange, history = {} }) {
               </div>
             )}
           </div>
-        ) : (
+        ) : selecting ? (
           <div className="workout-selection-list">
             <p className="workout-selection-guide">점진적 과부하를 적용할 운동과 세트만 선택하세요.</p>
             {parsed.map((exercise) => {
@@ -545,12 +544,36 @@ export default function WorkoutScreen({ workout, onChange, history = {} }) {
           </div>
         )}
 
-        <div className="daily-memo-actions workout-memo-actions">
-          <button className="ghost-button" type="button" onClick={clearWorkout} disabled={!workout?.memo && !bodyPart}>비우기</button>
-          {!selecting ? (
-            <button className="primary-button" type="button" onClick={startSelection} disabled={parsed.length === 0}>오늘 운동 완료</button>
-          ) : (
-            <button className="primary-button" type="button" onClick={saveWorkout} disabled={selectedSetCount === 0}>오늘 기록 저장</button>
+        <div className="workout-memo-actions">
+          {!selecting && !workout?.completed && (
+            <button
+              className="workout-complete-button"
+              type="button"
+              onClick={startSelection}
+              disabled={parsed.length === 0}
+            >
+              오늘 운동 완료
+            </button>
+          )}
+          {selecting && (
+            <button
+              className="workout-complete-button"
+              type="button"
+              onClick={saveWorkout}
+              disabled={selectedSetCount === 0}
+            >
+              오늘 기록 저장
+            </button>
+          )}
+          {workout?.completed && (
+            <button
+              className="workout-complete-button is-complete"
+              type="button"
+              aria-label="오늘 운동 완성됨. 길게 눌러 수정"
+              {...completedLongPressProps}
+            >
+              오늘 운동 완성됨
+            </button>
           )}
         </div>
       </section>
