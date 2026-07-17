@@ -1,4 +1,5 @@
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
+import { normalizeWorkoutLine, parseInlineWorkoutExercise, parseWorkoutMemo, parseWorkoutSetText } from "../utils/workout";
 
 const PURPOSES = {
   strength: { label: "스트렝스", range: "3~6회", min: 3, max: 6 },
@@ -6,71 +7,39 @@ const PURPOSES = {
   endurance: { label: "근지구력", range: "16~25회", min: 16, max: 25 },
 };
 
-function normalizeLine(value) {
-  return String(value || "").replace(/[×＊*']/g, "x").replace(/\s+/g, " ").trim();
+const EQUIPMENT_OPTIONS = [
+  { value: "free", label: "프리" },
+  { value: "machine", label: "머신" },
+  { value: "cable", label: "케이블" },
+];
+
+const DEFAULT_WEIGHT_INCREMENT = 5;
+
+function normalizeHistoryKey(value) {
+  return String(value || "")
+    .toLowerCase()
+    .replace(/\s+/g, "")
+    .replace(/[^0-9a-z가-힣]/g, "");
 }
 
-function parseSetText(text) {
-  const line = normalizeLine(text);
-  const match = line.match(/^(?:(\d+(?:\.\d+)?)\s*(?:kg)?\s*x\s*)?(\d+)\s*(?:회)?(?:\s*x\s*(\d+)\s*(?:세트)?)?$/i);
-  if (!match) return null;
-  return {
-    weight: match[1] ? Number(match[1]) : 0,
-    reps: Number(match[2]),
-    sets: match[3] ? Number(match[3]) : 1,
-    raw: text.trim(),
-  };
-}
-
-function parseInlineExercise(line) {
-  const match = normalizeLine(line).match(/^(.+?)\s+(?:(\d+(?:\.\d+)?)\s*(?:kg)?\s*x\s*)?(\d+)\s*(?:회)?(?:\s*x\s*(\d+)\s*(?:세트)?)?$/i);
-  if (!match || !/[가-힣a-zA-Z]/.test(match[1])) return null;
-  return {
-    name: match[1].trim(),
-    set: {
-      weight: match[2] ? Number(match[2]) : 0,
-      reps: Number(match[3]),
-      sets: match[4] ? Number(match[4]) : 1,
-      raw: line.trim(),
-    },
-  };
-}
-
-export function parseWorkoutMemo(memo) {
-  const exercises = [];
-  let current = null;
-
-  String(memo || "").split(/\r?\n/).forEach((sourceLine) => {
-    const line = sourceLine.trim();
-    if (!line) return;
-
-    const set = parseSetText(line);
-    if (set && current) {
-      current.sets.push({ ...set, id: `${current.id}-set-${current.sets.length}` });
-      return;
-    }
-
-    const inline = parseInlineExercise(line);
-    if (inline) {
-      current = {
-        id: `exercise-${exercises.length}-${inline.name}`,
-        name: inline.name,
-        sets: [],
-      };
-      current.sets.push({ ...inline.set, id: `${current.id}-set-0` });
-      exercises.push(current);
-      return;
-    }
-
-    current = {
-      id: `exercise-${exercises.length}-${line}`,
-      name: line,
-      sets: [],
-    };
-    exercises.push(current);
+function uniqueHistoryItems(values) {
+  const seen = new Set();
+  return values.filter((value) => {
+    const key = normalizeHistoryKey(value);
+    if (!key || seen.has(key)) return false;
+    seen.add(key);
+    return true;
   });
+}
 
-  return exercises.filter((exercise) => exercise.sets.length > 0);
+function extractMemoExerciseNames(memo) {
+  return uniqueHistoryItems(
+    String(memo || "")
+      .split(/\r?\n/)
+      .map((line) => line.trim())
+      .filter((line) => line && /[가-힣a-zA-Z]/.test(line) && !parseWorkoutSetText(line))
+      .map((line) => parseInlineWorkoutExercise(line)?.name || line),
+  );
 }
 
 function inferPurpose(reps) {
@@ -84,44 +53,105 @@ function formatSet(set) {
   return `${weight}${set.reps}회 × ${set.sets}세트`;
 }
 
-function getNextTarget(set, purposeKey, increment) {
+function getNextTarget(set, purposeKey) {
   const purpose = PURPOSES[purposeKey] || PURPOSES.hypertrophy;
   if (set.reps < purpose.max) {
     return { ...set, reps: set.reps + 1 };
   }
   return {
     ...set,
-    weight: set.weight > 0 ? set.weight + Number(increment || 0) : set.weight,
+    weight: set.weight > 0 ? set.weight + DEFAULT_WEIGHT_INCREMENT : set.weight,
     reps: purpose.min,
   };
 }
 
-export default function WorkoutScreen({ workout, onChange }) {
-  const [selecting, setSelecting] = useState(Boolean(workout?.selecting));
+function findMatchingHistory(values, query, limit = 5) {
+  const normalizedQuery = normalizeHistoryKey(query);
+  if (!normalizedQuery) return [];
 
-  useEffect(() => {
-    setSelecting(Boolean(workout?.selecting));
-  }, [workout?.selecting]);
+  return uniqueHistoryItems(values)
+    .map((value, index) => {
+      const key = normalizeHistoryKey(value);
+      const startsWith = key.startsWith(normalizedQuery);
+      const includes = key.includes(normalizedQuery);
+      return { value, index, startsWith, includes };
+    })
+    .filter((item) => item.includes)
+    .sort((a, b) => Number(b.startsWith) - Number(a.startsWith) || a.index - b.index)
+    .slice(0, limit)
+    .map((item) => item.value);
+}
 
+function getCurrentLineInfo(value, cursorPosition) {
+  const safeValue = String(value || "");
+  const cursor = Math.max(0, Math.min(Number(cursorPosition) || 0, safeValue.length));
+  const lineStart = safeValue.lastIndexOf("\n", Math.max(0, cursor - 1)) + 1;
+  const nextBreak = safeValue.indexOf("\n", cursor);
+  const lineEnd = nextBreak === -1 ? safeValue.length : nextBreak;
+  const rawLine = safeValue.slice(lineStart, lineEnd);
+  return {
+    lineStart,
+    lineEnd,
+    rawLine,
+    query: rawLine.trim(),
+  };
+}
+
+export default function WorkoutScreen({ workout, onChange, history = {} }) {
+  const [bodyPartFocused, setBodyPartFocused] = useState(false);
+  const [memoFocused, setMemoFocused] = useState(false);
+  const [memoCursor, setMemoCursor] = useState(0);
+  const memoRef = useRef(null);
+
+  const selecting = Boolean(workout?.selecting);
   const parsed = useMemo(() => parseWorkoutMemo(workout?.memo), [workout?.memo]);
   const selections = workout?.selections || {};
-  const increment = Number(workout?.increment || 5);
+  const equipmentByExercise = workout?.equipmentByExercise || {};
+  const bodyPart = workout?.bodyPart || "";
 
-  const updateWorkout = (patch) => onChange({
-    memo: "",
-    completed: false,
-    selecting: false,
-    selections: {},
-    targets: [],
-    increment: 5,
-    ...workout,
-    ...patch,
-  });
+  const updateWorkout = (patch) => {
+    const nextWorkout = {
+      memo: "",
+      bodyPart: "",
+      completed: false,
+      selecting: false,
+      selections: {},
+      equipmentByExercise: {},
+      targets: [],
+      ...workout,
+      ...patch,
+    };
+    delete nextWorkout.increment;
+    onChange(nextWorkout);
+  };
+
+  const bodyPartSuggestions = useMemo(
+    () => (bodyPartFocused ? findMatchingHistory(history.bodyParts || [], bodyPart) : []),
+    [bodyPartFocused, bodyPart, history.bodyParts],
+  );
+
+  const memoLineInfo = useMemo(
+    () => getCurrentLineInfo(workout?.memo || "", memoCursor),
+    [workout?.memo, memoCursor],
+  );
+
+  const exerciseSuggestionPool = useMemo(
+    () => uniqueHistoryItems([...(history.exerciseNames || []), ...extractMemoExerciseNames(workout?.memo)]),
+    [history.exerciseNames, workout?.memo],
+  );
+
+  const exerciseSuggestions = useMemo(() => {
+    if (!memoFocused || selecting) return [];
+    const query = memoLineInfo.query;
+    if (!query || /\d/.test(query) || /(?:^|\s)x(?:\s|$)/i.test(query)) return [];
+    return findMatchingHistory(exerciseSuggestionPool, query).filter(
+      (name) => normalizeHistoryKey(name) !== normalizeHistoryKey(query),
+    );
+  }, [memoFocused, selecting, memoLineInfo.query, exerciseSuggestionPool]);
 
   const startSelection = () => {
     if (parsed.length === 0) return;
-    setSelecting(true);
-    updateWorkout({ selecting: true, completed: false });
+    updateWorkout({ bodyPart: bodyPart.trim(), selecting: true, completed: false });
   };
 
   const toggleExercise = (exercise) => {
@@ -132,6 +162,7 @@ export default function WorkoutScreen({ workout, onChange }) {
     } else {
       next[exercise.id] = {
         name: exercise.name,
+        equipment: equipmentByExercise[normalizeHistoryKey(exercise.name)] || history.equipmentByExercise?.[normalizeHistoryKey(exercise.name)] || "",
         selectedSetIds: exercise.sets.map((set) => set.id),
         purposes: Object.fromEntries(exercise.sets.map((set) => [set.id, inferPurpose(set.reps)])),
       };
@@ -142,6 +173,7 @@ export default function WorkoutScreen({ workout, onChange }) {
   const toggleSet = (exercise, set) => {
     const current = selections[exercise.id] || {
       name: exercise.name,
+      equipment: equipmentByExercise[normalizeHistoryKey(exercise.name)] || history.equipmentByExercise?.[normalizeHistoryKey(exercise.name)] || "",
       selectedSetIds: [],
       purposes: {},
     };
@@ -179,6 +211,26 @@ export default function WorkoutScreen({ workout, onChange }) {
     });
   };
 
+  const changeEquipment = (exercise, equipment) => {
+    const exerciseKey = normalizeHistoryKey(exercise.name);
+    const nextEquipmentByExercise = {
+      ...equipmentByExercise,
+      [exerciseKey]: equipment,
+    };
+    const currentSelection = selections[exercise.id];
+    const nextSelections = currentSelection
+      ? {
+          ...selections,
+          [exercise.id]: { ...currentSelection, equipment },
+        }
+      : selections;
+
+    updateWorkout({
+      equipmentByExercise: nextEquipmentByExercise,
+      selections: nextSelections,
+    });
+  };
+
   const saveWorkout = () => {
     const targets = [];
     parsed.forEach((exercise) => {
@@ -189,14 +241,14 @@ export default function WorkoutScreen({ workout, onChange }) {
         const purpose = selected.purposes[set.id] || inferPurpose(set.reps);
         targets.push({
           exerciseName: exercise.name,
+          equipment: equipmentByExercise[normalizeHistoryKey(exercise.name)] || selected.equipment || history.equipmentByExercise?.[normalizeHistoryKey(exercise.name)] || "",
           source: set,
           purpose,
-          next: getNextTarget(set, purpose, increment),
+          next: getNextTarget(set, purpose),
         });
       });
     });
-    updateWorkout({ completed: true, selecting: false, targets });
-    setSelecting(false);
+    updateWorkout({ bodyPart: bodyPart.trim(), completed: true, selecting: false, targets });
   };
 
   const selectedSetCount = Object.values(selections).reduce((sum, item) => {
@@ -207,8 +259,108 @@ export default function WorkoutScreen({ workout, onChange }) {
       .reduce((setSum, set) => setSum + set.sets, 0);
   }, 0);
 
+  const handleMemoChange = (event) => {
+    setMemoCursor(event.target.selectionStart || 0);
+    updateWorkout({ memo: event.target.value, completed: false, targets: [] });
+  };
+
+  const handleMemoSelection = (event) => {
+    setMemoCursor(event.currentTarget.selectionStart || 0);
+  };
+
+  const handleMemoKeyDown = (event) => {
+    if (event.key !== " " || event.nativeEvent?.isComposing) return;
+
+    const input = event.currentTarget;
+    const selectionStart = input.selectionStart ?? 0;
+    const selectionEnd = input.selectionEnd ?? selectionStart;
+    if (selectionStart !== selectionEnd) return;
+
+    const value = input.value;
+    const lineStart = value.lastIndexOf("\n", Math.max(0, selectionStart - 1)) + 1;
+    const currentLineBeforeCursor = value.slice(lineStart, selectionStart);
+    const xCount = (normalizeWorkoutLine(currentLineBeforeCursor).match(/(?:^|\s)x(?:\s|$)/gi) || []).length;
+
+    if (!/\d$/.test(currentLineBeforeCursor) || xCount >= 2) return;
+
+    event.preventDefault();
+    const inserted = " x ";
+    const nextValue = `${value.slice(0, selectionStart)}${inserted}${value.slice(selectionEnd)}`;
+    const nextCursor = selectionStart + inserted.length;
+    updateWorkout({ memo: nextValue, completed: false, targets: [] });
+    setMemoCursor(nextCursor);
+
+    window.requestAnimationFrame(() => {
+      memoRef.current?.focus();
+      memoRef.current?.setSelectionRange(nextCursor, nextCursor);
+    });
+  };
+
+  const applyExerciseSuggestion = (exerciseName) => {
+    const value = workout?.memo || "";
+    const { lineStart, lineEnd } = getCurrentLineInfo(value, memoCursor);
+    const nextValue = `${value.slice(0, lineStart)}${exerciseName}${value.slice(lineEnd)}`;
+    const nextCursor = lineStart + exerciseName.length;
+    updateWorkout({ memo: nextValue, completed: false, targets: [] });
+    setMemoCursor(nextCursor);
+    setMemoFocused(true);
+
+    window.requestAnimationFrame(() => {
+      memoRef.current?.focus();
+      memoRef.current?.setSelectionRange(nextCursor, nextCursor);
+    });
+  };
+
+  const clearWorkout = () => {
+    updateWorkout({
+      memo: "",
+      bodyPart: "",
+      selections: {},
+      equipmentByExercise: {},
+      targets: [],
+      completed: false,
+      selecting: false,
+    });
+  };
+
   return (
     <div className="workout-screen">
+      {!selecting && (
+        <section className="workout-bodypart-card">
+          <label className="workout-bodypart-label" htmlFor="workout-bodypart-input">운동 부위</label>
+          <div className="workout-autocomplete-wrap">
+            <input
+              id="workout-bodypart-input"
+              className="workout-bodypart-input"
+              type="text"
+              value={bodyPart}
+              onChange={(event) => updateWorkout({ bodyPart: event.target.value, completed: false })}
+              onFocus={() => setBodyPartFocused(true)}
+              onBlur={() => window.setTimeout(() => setBodyPartFocused(false), 120)}
+              placeholder="예: 가슴, 등, 어깨"
+              autoComplete="off"
+            />
+            {bodyPartSuggestions.length > 0 && (
+              <div className="workout-autocomplete-list" role="listbox" aria-label="운동 부위 이전 기록">
+                {bodyPartSuggestions.map((suggestion) => (
+                  <button
+                    key={suggestion}
+                    type="button"
+                    onMouseDown={(event) => event.preventDefault()}
+                    onClick={() => {
+                      updateWorkout({ bodyPart: suggestion, completed: false });
+                      setBodyPartFocused(false);
+                    }}
+                  >
+                    {suggestion}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+        </section>
+      )}
+
       <section className="workout-memo-card">
         <div className="section-title workout-title-row">
           <strong>운동 메모</strong>
@@ -216,28 +368,68 @@ export default function WorkoutScreen({ workout, onChange }) {
         </div>
 
         {!selecting ? (
-          <textarea
-            className="workout-memo-input"
-            value={workout?.memo || ""}
-            onChange={(event) => updateWorkout({ memo: event.target.value, completed: false, targets: [] })}
-            placeholder={"스쿼트\n140 x 5 x 1\n160 x 5 x 3\n\n인클라인 덤벨프레스\n35 x 10 x 3"}
-            spellCheck={false}
-          />
+          <div className="workout-memo-input-wrap">
+            <textarea
+              ref={memoRef}
+              className="workout-memo-input"
+              value={workout?.memo || ""}
+              onChange={handleMemoChange}
+              onKeyDown={handleMemoKeyDown}
+              onClick={handleMemoSelection}
+              onKeyUp={handleMemoSelection}
+              onSelect={handleMemoSelection}
+              onFocus={(event) => {
+                setMemoFocused(true);
+                setMemoCursor(event.currentTarget.selectionStart || 0);
+              }}
+              onBlur={() => window.setTimeout(() => setMemoFocused(false), 120)}
+              placeholder={"스쿼트\n140 x 5 x 1\n160 x 5 x 3\n\n인클라인 덤벨프레스\n35 x 10 x 3"}
+              spellCheck={false}
+            />
+            {exerciseSuggestions.length > 0 && (
+              <div className="workout-autocomplete-list workout-exercise-suggestions" role="listbox" aria-label="운동 이름 이전 기록">
+                {exerciseSuggestions.map((suggestion) => (
+                  <button
+                    key={suggestion}
+                    type="button"
+                    onMouseDown={(event) => event.preventDefault()}
+                    onClick={() => applyExerciseSuggestion(suggestion)}
+                  >
+                    {suggestion}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
         ) : (
           <div className="workout-selection-list">
             <p className="workout-selection-guide">점진적 과부하를 적용할 운동과 세트만 선택하세요.</p>
             {parsed.map((exercise) => {
               const exerciseSelection = selections[exercise.id];
+              const equipmentValue = equipmentByExercise[normalizeHistoryKey(exercise.name)] || exerciseSelection?.equipment || history.equipmentByExercise?.[normalizeHistoryKey(exercise.name)] || "";
               return (
                 <article className="workout-exercise-block" key={exercise.id}>
-                  <label className="workout-exercise-head">
-                    <input
-                      type="checkbox"
-                      checked={Boolean(exerciseSelection)}
-                      onChange={() => toggleExercise(exercise)}
-                    />
-                    <strong>{exercise.name}</strong>
-                  </label>
+                  <div className="workout-exercise-head">
+                    <label className="workout-exercise-check">
+                      <input
+                        type="checkbox"
+                        checked={Boolean(exerciseSelection)}
+                        onChange={() => toggleExercise(exercise)}
+                      />
+                      <strong>{exercise.name}</strong>
+                    </label>
+                    <select
+                      className="workout-equipment-select"
+                      value={equipmentValue}
+                      onChange={(event) => changeEquipment(exercise, event.target.value)}
+                      aria-label={`${exercise.name} 운동 기구 분류`}
+                    >
+                      <option value="">구분</option>
+                      {EQUIPMENT_OPTIONS.map((option) => (
+                        <option key={option.value} value={option.value}>{option.label}</option>
+                      ))}
+                    </select>
+                  </div>
 
                   {exercise.sets.map((set) => {
                     const checked = Boolean(exerciseSelection?.selectedSetIds.includes(set.id));
@@ -264,13 +456,8 @@ export default function WorkoutScreen({ workout, onChange }) {
           </div>
         )}
 
-        <div className="workout-increment-row">
-          <span>중량 증가 단위</span>
-          <label><input type="number" min="0" step="0.5" value={increment} onChange={(event) => updateWorkout({ increment: event.target.value })} /> kg</label>
-        </div>
-
-        <div className="daily-memo-actions">
-          <button className="ghost-button" type="button" onClick={() => updateWorkout({ memo: "", selections: {}, targets: [], completed: false })} disabled={!workout?.memo}>비우기</button>
+        <div className="daily-memo-actions workout-memo-actions">
+          <button className="ghost-button" type="button" onClick={clearWorkout} disabled={!workout?.memo && !bodyPart}>비우기</button>
           {!selecting ? (
             <button className="primary-button" type="button" onClick={startSelection} disabled={parsed.length === 0}>오늘 운동 완료</button>
           ) : (
@@ -280,7 +467,10 @@ export default function WorkoutScreen({ workout, onChange }) {
       </section>
 
       {selecting && (
-        <div className="workout-selected-summary">선택한 성장 관리 세트 <strong>{selectedSetCount}세트</strong></div>
+        <div className="workout-selected-summary">
+          선택한 성장 관리 세트
+          <strong>{bodyPart.trim() || "부위 미선택"}{selectedSetCount > 0 ? ` · ${selectedSetCount}세트` : ""}</strong>
+        </div>
       )}
 
       {workout?.targets?.length > 0 && (

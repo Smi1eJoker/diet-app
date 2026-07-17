@@ -35,6 +35,7 @@ import WorkoutScreen from "./components/WorkoutScreen";
 import { MacroLegend } from "./components/summary";
 import { Modal, ModalActions } from "./components/modals/Modal";
 import { addDays, getDateKey, isSameDate } from "./utils/date";
+import { parseWorkoutMemo } from "./utils/workout";
 import { buildStats } from "./utils/stats";
 import {
   applyManualTargets,
@@ -186,6 +187,58 @@ function getExternalFoodMetaText(food) {
     food?.category,
     food?.maker,
   ].filter(Boolean).join(" · ");
+}
+
+
+function normalizeWorkoutHistoryKey(value) {
+  return String(value || "")
+    .toLowerCase()
+    .replace(/\s+/g, "")
+    .replace(/[^0-9a-z가-힣]/g, "");
+}
+
+function buildWorkoutHistory(dailyRecords, excludedDateKey) {
+  const bodyParts = [];
+  const exerciseNames = [];
+  const equipmentByExercise = {};
+  const bodyPartKeys = new Set();
+  const exerciseKeys = new Set();
+
+  Object.entries(dailyRecords || {}).forEach(([dateKey, record]) => {
+    if (dateKey === excludedDateKey) return;
+    const savedWorkout = record?.workout;
+    if (!savedWorkout) return;
+
+    const bodyPart = String(savedWorkout.bodyPart || "").trim();
+    const bodyPartKey = normalizeWorkoutHistoryKey(bodyPart);
+    if (bodyPartKey && !bodyPartKeys.has(bodyPartKey)) {
+      bodyPartKeys.add(bodyPartKey);
+      bodyParts.push(bodyPart);
+    }
+
+    parseWorkoutMemo(savedWorkout.memo).forEach((exercise) => {
+      const exerciseKey = normalizeWorkoutHistoryKey(exercise.name);
+      if (!exerciseKey || exerciseKeys.has(exerciseKey)) return;
+      exerciseKeys.add(exerciseKey);
+      exerciseNames.push(exercise.name);
+    });
+
+    Object.entries(savedWorkout.equipmentByExercise || {}).forEach(([exerciseKey, equipment]) => {
+      const normalizedKey = normalizeWorkoutHistoryKey(exerciseKey);
+      if (normalizedKey && equipment && !equipmentByExercise[normalizedKey]) {
+        equipmentByExercise[normalizedKey] = equipment;
+      }
+    });
+
+    Object.values(savedWorkout.selections || {}).forEach((selection) => {
+      const exerciseKey = normalizeWorkoutHistoryKey(selection?.name);
+      if (exerciseKey && selection?.equipment && !equipmentByExercise[exerciseKey]) {
+        equipmentByExercise[exerciseKey] = selection.equipment;
+      }
+    });
+  });
+
+  return { bodyParts, exerciseNames, equipmentByExercise };
 }
 
 export default function App() {
@@ -416,7 +469,7 @@ export default function App() {
     });
   };
 
-  const workout = dailyRecords[selectedDateKey]?.workout || { memo: "", selections: {}, targets: [], increment: 5, completed: false };
+  const workout = dailyRecords[selectedDateKey]?.workout || { memo: "", bodyPart: "", selections: {}, equipmentByExercise: {}, targets: [], completed: false };
   const updateWorkout = (nextWorkout) => {
     setDailyRecords((current) => ({
       ...current,
@@ -426,6 +479,11 @@ export default function App() {
       },
     }));
   };
+
+  const workoutHistory = useMemo(
+    () => buildWorkoutHistory(dailyRecords, selectedDateKey),
+    [dailyRecords, selectedDateKey],
+  );
 
   useEffect(() => {
     if (skipNextMemoSyncRef.current) {
@@ -2272,7 +2330,7 @@ export default function App() {
       )}
 
       {activeTab === "record" && recordMode === "workout" && (
-        <WorkoutScreen workout={workout} onChange={updateWorkout} />
+        <WorkoutScreen workout={workout} onChange={updateWorkout} history={workoutHistory} />
       )}
 
       {activeTab === "stats" && (

@@ -4941,3 +4941,139 @@ textarea,
   font-style: normal;
   font-weight: 900;
 }
+
+/* Workout memo autocomplete and classification */
+.workout-bodypart-card {
+  padding: 12px 14px;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: start;
+  gap: 12px;
+  border: 1px solid #303030;
+  border-radius: 14px;
+  background: #111111;
+}
+
+.workout-bodypart-label {
+  padding-top: 10px;
+  color: #dcdcdc;
+  font-size: 13px;
+  font-weight: 900;
+  white-space: nowrap;
+}
+
+.workout-autocomplete-wrap,
+.workout-memo-input-wrap {
+  position: relative;
+  min-width: 0;
+}
+
+.workout-bodypart-input {
+  width: 100%;
+  min-height: 40px;
+  padding: 0 12px;
+  border: 1px solid #343434;
+  border-radius: 10px;
+  outline: none;
+  background: #181818;
+  color: #f3f3f3;
+  font-size: 14px;
+  font-weight: 850;
+}
+
+.workout-bodypart-input:focus {
+  border-color: #666;
+}
+
+.workout-autocomplete-list {
+  position: relative;
+  z-index: 5;
+  overflow: hidden;
+  margin-top: 6px;
+  border: 1px solid #343434;
+  border-radius: 10px;
+  background: #151515;
+  box-shadow: 0 10px 24px rgba(0, 0, 0, 0.28);
+}
+
+.workout-autocomplete-list button {
+  width: 100%;
+  min-height: 40px;
+  padding: 0 12px;
+  display: flex;
+  align-items: center;
+  border: 0;
+  border-bottom: 1px solid #292929;
+  background: transparent;
+  color: #ededed;
+  font-size: 13px;
+  font-weight: 850;
+  text-align: left;
+}
+
+.workout-autocomplete-list button:last-child {
+  border-bottom: 0;
+}
+
+.workout-autocomplete-list button:active {
+  background: #242424;
+}
+
+.workout-exercise-suggestions {
+  max-height: 210px;
+  overflow-y: auto;
+}
+
+.workout-exercise-head {
+  justify-content: space-between;
+}
+
+.workout-exercise-check {
+  min-width: 0;
+  flex: 1 1 auto;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.workout-exercise-check strong {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.workout-equipment-select {
+  flex: 0 0 86px;
+  width: 86px;
+  min-height: 34px;
+  padding: 0 8px;
+  border: 1px solid #3a3a3a;
+  border-radius: 8px;
+  outline: none;
+  background: #111111;
+  color: #f2f2f2;
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.workout-memo-actions {
+  margin-top: 12px;
+}
+
+@media (max-width: 380px) {
+  .workout-bodypart-card {
+    grid-template-columns: 1fr;
+    gap: 7px;
+  }
+
+  .workout-bodypart-label {
+    padding-top: 0;
+  }
+
+  .workout-equipment-select {
+    flex-basis: 78px;
+    width: 78px;
+    padding: 0 6px;
+  }
+}
