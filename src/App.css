@@ -4833,6 +4833,35 @@ textarea,
 
 .workout-memo-input:focus { border-color: #666; }
 
+.workout-completed-memo {
+  width: 100%;
+  min-height: 300px;
+  max-height: 430px;
+  overflow-y: auto;
+  padding: 16px 13px;
+  border: 1px solid #303030;
+  border-radius: 13px;
+  background: #181818;
+  color: #f2f2f2;
+  font-size: 15px;
+  font-weight: 750;
+  line-height: 1.75;
+  white-space: pre-wrap;
+  word-break: break-word;
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
+}
+
+.workout-completed-memo-row {
+  min-height: 1.75em;
+}
+
+.workout-completed-memo-row.is-growth-set {
+  color: #66e36f;
+  font-weight: 900;
+}
+
 .workout-selection-guide {
   margin: 0 0 10px;
   color: #a3a3a3;
@@ -4985,6 +5014,16 @@ textarea,
   border-color: #666;
 }
 
+<<<<<<< HEAD
+=======
+.workout-bodypart-card.is-complete .workout-bodypart-input:disabled {
+  border-color: #303030;
+  background: #181818;
+  color: #f2f2f2;
+  opacity: 1;
+}
+
+>>>>>>> 3e0b93e (update app)
 .workout-autocomplete-list {
   position: relative;
   z-index: 5;
@@ -5059,6 +5098,35 @@ textarea,
 
 .workout-memo-actions {
   margin-top: 12px;
+<<<<<<< HEAD
+=======
+  display: block;
+}
+
+.workout-complete-button {
+  width: 100%;
+  min-height: 44px;
+  padding: 0 18px;
+  border: 1px solid #f5f5f5;
+  border-radius: 999px;
+  background: #f5f5f5;
+  color: #050505;
+  font-size: 14px;
+  font-weight: 900;
+}
+
+.workout-complete-button.is-complete {
+  border-color: #66e36f;
+  background: #66e36f;
+  color: #050505;
+}
+
+.workout-complete-button:disabled {
+  border-color: #262626;
+  background: #181818;
+  color: #666666;
+  cursor: default;
+>>>>>>> 3e0b93e (update app)
 }
 
 @media (max-width: 380px) {
